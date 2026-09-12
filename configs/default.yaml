@@ -1,0 +1,60 @@
+# =============================================================================
+# Default Configuration for Geometry-Aware Metric Learning
+# Cross-Lingual Few-Shot Sign Language Recognition
+# =============================================================================
+
+# --- Paths ---
+data_dir: "data/landmarks"          # Root directory for .npy keypoint files
+splits_dir: "splits"                # Directory for train/test JSON splits
+checkpoint_dir: "checkpoints"       # Directory for model checkpoints
+results_dir: "results"              # Directory for evaluation results
+
+# --- Dataset ---
+dataset: "asl"                      # One of: asl, libras, arabic, thai
+split_seed: 42                      # Seed for deterministic 70/30 splitting
+train_ratio: 0.7                    # Train split ratio
+
+# --- Representation ---
+representation: "angle"             # One of: raw (63-D), angle (20-D), raw_angle (83-D)
+
+# --- Encoder ---
+encoder: "mlp"                      # One of: mlp, transformer
+embedding_dim: 128                  # Output embedding dimension
+hidden_dim: 256                     # Hidden layer dimension (MLP) / FFN dim (Transformer)
+dropout: 0.3                        # Dropout rate (MLP)
+
+# Transformer-specific
+transformer_heads: 4                # Number of attention heads
+transformer_layers: 2               # Number of encoder layers
+transformer_dropout: 0.1            # Dropout rate (Transformer)
+d_model: 128                        # Model dimension (Transformer)
+
+# --- Prototypical Network ---
+n_way: 5                            # Number of classes per episode
+k_shot: 5                           # Number of support examples per class
+q_query: 15                         # Number of query examples per class
+distance: "euclidean"               # Distance metric: euclidean
+
+# --- Training ---
+max_epochs: 200                     # Maximum training epochs
+episodes_per_epoch: 100             # Number of episodes per training epoch
+lr: 1.0e-4                          # Learning rate (AdamW)
+weight_decay: 1.0e-4                # Weight decay (AdamW)
+grad_clip: 1.0                      # Gradient clipping max norm
+patience: 15                        # Early stopping patience (epochs)
+
+# --- Loss ---
+supcon_weight: 0.5                  # Weight of SupCon loss
+supcon_temperature: 0.07            # SupCon temperature parameter τ
+
+# --- Evaluation ---
+num_eval_episodes: 600              # Number of evaluation episodes
+seed: 42                            # Global random seed
+
+# --- Cross-Lingual Adaptation ---
+adapt_epochs: 20                    # Fine-tuning epochs for target-supervised mode
+adapt_lr: 1.0e-4                    # Fine-tuning learning rate
+
+# --- Visualisation ---
+tsne_perplexity: 30                 # t-SNE perplexity
+tsne_n_iter: 1000                   # t-SNE iterations

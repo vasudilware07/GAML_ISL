@@ -1,0 +1,7 @@
+# Thai Fingerspelling Configuration
+# 42 classes, ~1998 train / ~863 test samples
+# Source: https://www.kaggle.com/datasets/nickihartmann/thai-letter-sign-language
+
+dataset: "thai"
+data_dir: "data/landmarks/thai"
+num_classes: 42
