@@ -1,0 +1,39 @@
+
+  Source dataset: arabic_sign_alphabet
+
+============================================================
+  Pretraining: mlp / raw on arabic_sign_alphabet
+============================================================
+  Pretrained in 3.7s
+
+  → arabic_sign_alphabet → libras_alphabet | mlp/raw | mode=frozen
+    Acc: 0.9589 ± 0.0046
+
+  → arabic_sign_alphabet → libras_alphabet | mlp/raw | mode=adapted
+    Acc: 0.9654 ± 0.0044
+
+============================================================
+  Pretraining: mlp / angle on arabic_sign_alphabet
+============================================================
+  Pretrained in 8.2s
+
+  → arabic_sign_alphabet → libras_alphabet | mlp/angle | mode=frozen
+    Acc: 0.9487 ± 0.0049
+
+  → arabic_sign_alphabet → libras_alphabet | mlp/angle | mode=adapted
+    Acc: 0.9587 ± 0.0043
+
+============================================================
+  Pretraining: mlp / raw_angle on arabic_sign_alphabet
+============================================================
+  Pretrained in 9.8s
+
+  → arabic_sign_alphabet → libras_alphabet | mlp/raw_angle | mode=frozen
+    Acc: 0.9713 ± 0.0037
+
+  → arabic_sign_alphabet → libras_alphabet | mlp/raw_angle | mode=adapted
+    Acc: 0.9738 ± 0.0037
+
+============================================================
+  Saved 6 rows to results/cross_domain_arabic_to_libras.csv
+============================================================

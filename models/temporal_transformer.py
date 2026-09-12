@@ -1,195 +1,155 @@
 """
-Spatial Transformer Encoder for hand keypoint embedding.
+Transformer encoder for static hand landmarks.
 
-For the raw representation, 21 keypoints are treated as a length-21 token
-sequence with 3-D token embeddings, projected to d_model=128. For angle and
-raw_angle inputs (where no natural per-keypoint tokenisation exists), the
-full vector is treated as a single token, making self-attention degenerate
-to a feedforward path.
-
-Architecture (raw representation):
-    21 keypoints × 3-D → Linear projection to d_model=128
-    + Sinusoidal positional encodings
-    → 2× TransformerEncoderLayer (4 heads, FFN=256, dropout=0.1)
-    → Mean-pool across sequence → Linear → LayerNorm → 128-D
-
-References:
-    Section 3.3 — Model Architecture (Spatial Transformer encoder)
-    Table 1 — Encoder parameter counts
+Attends over the 21 hand landmarks (spatial self-attention) rather than
+temporal frames, producing a fixed-size embedding from a single image.
 """
 
 import math
+from typing import Optional
 
 import torch
 import torch.nn as nn
 
 
-class SinusoidalPositionalEncoding(nn.Module):
-    """
-    Standard sinusoidal positional encoding.
-
-    Adds position-dependent signals to token embeddings to encode
-    sequential order. Used for the 21-keypoint token sequence.
+class PositionalEncoding(nn.Module):
+    """Sinusoidal positional encoding for landmark ordering.
 
     Args:
-        d_model: Model dimension (128).
-        max_len: Maximum sequence length (default: 100).
-        dropout: Dropout probability (default: 0.1).
+        d_model: Feature dimensionality.
+        max_len: Maximum number of landmarks/tokens.
+        dropout: Dropout rate.
     """
 
-    def __init__(self, d_model: int, max_len: int = 100, dropout: float = 0.1):
+    def __init__(self, d_model: int, max_len: int = 512, dropout: float = 0.1) -> None:
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
-        # Compute sinusoidal positional encodings
         pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
+            torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model)
         )
-
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)  # (1, max_len, d_model)
-
         self.register_buffer("pe", pe)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Add positional encoding to input.
+        """Add positional encoding.
 
         Args:
-            x: Input tensor of shape (batch_size, seq_len, d_model).
+            x: ``(B, V, D)`` where V = number of landmarks.
 
         Returns:
-            Tensor of same shape with positional encodings added.
+            ``(B, V, D)`` with positional encoding added.
         """
-        x = x + self.pe[:, : x.size(1), :]
+        x = x + self.pe[:, : x.size(1)]
         return self.dropout(x)
 
 
-class TransformerEncoder(nn.Module):
-    """
-    Spatial Transformer encoder for hand keypoints.
+class TemporalTransformerEncoder(nn.Module):
+    """Transformer encoder operating on static hand landmarks.
 
-    For the 'raw' representation, treats 21 keypoints as a length-21 sequence
-    of 3-D tokens, projects each to d_model, applies self-attention, and pools.
-    For 'angle' and 'raw_angle', the full vector is a single token, so
-    self-attention degenerates to a feedforward path.
+    Applies spatial self-attention over the 21 hand landmarks.
+
+    Input:
+        ``(B, 21, 3)`` raw landmarks → projected to ``(B, 21, d_model)``
+        ``(B, 210)`` pairwise distances → projected to ``(B, 1, d_model)``
+
+    Output:
+        ``(B, embedding_dim)`` pooled embedding.
 
     Args:
-        input_dim: Input feature dimension (63 for raw, 20 for angle, 83 for raw_angle).
-        embedding_dim: Output embedding dimension (default: 128).
-        d_model: Internal model dimension (default: 128).
-        n_heads: Number of attention heads (default: 4).
-        n_layers: Number of Transformer encoder layers (default: 2).
-        ffn_dim: Feed-forward network dimension (default: 256).
-        dropout: Dropout probability (default: 0.1).
-        representation: Representation type ('raw', 'angle', 'raw_angle').
+        input_dim: Per-landmark feature dimension (3 for xyz, or 210 for pairwise).
+        embedding_dim: Output embedding size.
+        num_heads: Number of attention heads.
+        num_layers: Number of Transformer encoder layers.
+        dim_feedforward: FFN hidden dimension.
+        dropout: Dropout rate.
+        max_len: Maximum number of tokens for positional encoding.
     """
 
     def __init__(
         self,
-        input_dim: int,
+        input_dim: int = 63,
         embedding_dim: int = 128,
-        d_model: int = 128,
-        n_heads: int = 4,
-        n_layers: int = 2,
-        ffn_dim: int = 256,
+        num_heads: int = 4,
+        num_layers: int = 2,
+        dim_feedforward: int = 256,
         dropout: float = 0.1,
-        representation: str = "raw",
-    ):
+        max_len: int = 512,
+    ) -> None:
         super().__init__()
-        self.input_dim = input_dim
-        self.embedding_dim = embedding_dim
-        self.d_model = d_model
-        self.representation = representation
+        # d_model must be divisible by num_heads
+        self.d_model = (embedding_dim // num_heads) * num_heads
+        if self.d_model < num_heads:
+            self.d_model = num_heads
 
-        if representation == "raw":
-            # Tokenise: 21 keypoints, each 3-D → project to d_model
-            self.token_dim = 3
-            self.seq_len = 21
-            self.input_projection = nn.Linear(self.token_dim, d_model)
-            self.pos_encoding = SinusoidalPositionalEncoding(
-                d_model=d_model, max_len=self.seq_len + 1, dropout=dropout
-            )
-        else:
-            # angle (20-D) or raw_angle (83-D): single token
-            self.token_dim = input_dim
-            self.seq_len = 1
-            self.input_projection = nn.Linear(self.token_dim, d_model)
-            self.pos_encoding = None  # No positional encoding for single token
+        self.input_proj = nn.Linear(input_dim, self.d_model)
+        self.pos_enc = PositionalEncoding(self.d_model, max_len=max_len, dropout=dropout)
 
-        # Transformer encoder layers
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=n_heads,
-            dim_feedforward=ffn_dim,
+            d_model=self.d_model,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
             dropout=dropout,
-            activation="relu",
             batch_first=True,
         )
-        self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer, num_layers=n_layers
-        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # Output projection with LayerNorm
-        self.output_projection = nn.Linear(d_model, embedding_dim)
-        self.layer_norm = nn.LayerNorm(embedding_dim)
+        self.pool_proj = nn.Linear(self.d_model, embedding_dim)
+        self.norm = nn.LayerNorm(embedding_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass.
+        """Forward pass.
 
         Args:
-            x: Input tensor of shape (batch_size, input_dim).
+            x: ``(B, 21, 3)`` or ``(B, D)`` for pairwise.
 
         Returns:
-            Embedding tensor of shape (batch_size, embedding_dim).
+            ``(B, embedding_dim)`` embedding.
         """
-        batch_size = x.size(0)
-
-        if self.representation == "raw":
-            # Reshape to (batch_size, 21, 3) — tokenize as 21 keypoints
-            x = x.view(batch_size, self.seq_len, self.token_dim)
-        else:
-            # Single token: (batch_size, 1, input_dim)
+        if x.dim() == 2:
+            # Pairwise (B, 210) → (B, 1, 210) → treat as single token
             x = x.unsqueeze(1)
+        # x: (B, V, C)  where V=21, C=3 (or V=1, C=210)
+        x = self.input_proj(x)   # (B, V, d_model)
+        x = self.pos_enc(x)
+        x = self.transformer(x)  # (B, V, d_model)
 
-        # Project tokens to d_model
-        x = self.input_projection(x)  # (batch_size, seq_len, d_model)
-
-        # Add positional encoding (only for raw)
-        if self.pos_encoding is not None:
-            x = self.pos_encoding(x)
-
-        # Apply Transformer encoder
-        x = self.transformer_encoder(x)  # (batch_size, seq_len, d_model)
-
-        # Mean-pool across the sequence dimension
-        x = x.mean(dim=1)  # (batch_size, d_model)
-
-        # Output projection with LayerNorm
-        x = self.output_projection(x)
-        x = self.layer_norm(x)
-
+        # Global average pooling over landmarks
+        x = x.mean(dim=1)         # (B, d_model)
+        x = self.pool_proj(x)     # (B, embedding_dim)
+        x = self.norm(x)
         return x
 
-    def get_last_layer(self) -> nn.Linear:
-        """Get the final linear projection layer for target-supervised adaptation."""
-        return self.output_projection
 
-    def freeze_except_last(self):
-        """Freeze all parameters except the output projection layer."""
-        for param in self.parameters():
-            param.requires_grad = False
+def build_transformer_encoder(cfg: dict, representation: str = "raw") -> TemporalTransformerEncoder:
+    """Factory to build a Transformer encoder from config.
 
-        for param in self.output_projection.parameters():
-            param.requires_grad = True
-        for param in self.layer_norm.parameters():
-            param.requires_grad = True
+    Args:
+        cfg: Full config dict.
+        representation: ``'raw'`` | ``'pairwise'`` | ``'graph'``.
 
-    def unfreeze_all(self):
-        """Unfreeze all parameters."""
-        for param in self.parameters():
-            param.requires_grad = True
+    Returns:
+        Configured ``TemporalTransformerEncoder``.
+    """
+    if representation == "pairwise":
+        input_dim = 210   # full pairwise vector as single token
+    elif representation == "angle":
+        input_dim = 20    # joint angles as single token
+    elif representation == "raw_angle":
+        input_dim = 83    # raw+angle as single token
+    else:
+        input_dim = 3     # per-landmark: (x, y, z)
+
+    t_cfg = cfg["model"]["transformer"]
+    return TemporalTransformerEncoder(
+        input_dim=input_dim,
+        embedding_dim=cfg["model"]["embedding_dim"],
+        num_heads=t_cfg["num_heads"],
+        num_layers=t_cfg["num_layers"],
+        dim_feedforward=t_cfg["dim_feedforward"],
+        dropout=t_cfg["dropout"],
+    )

@@ -1,0 +1,107 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260513163916
+Username: CHAYANIN\33849
+RunAs User: CHAYANIN\33849
+Configuration Name: 
+Machine: CHAYANIN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run_trained_three_seeds.ps1
+Process ID: 48556
+PSVersion: 5.1.26100.8115
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8115
+BuildVersion: 10.0.26100.8115
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is .\results\within_domain_trained_full_gpu_3seeds_600ep.log
+**********************
+Windows PowerShell transcript start
+Start time: 20260514043854
+Username: CHAYANIN\33849
+RunAs User: CHAYANIN\33849
+Configuration Name: 
+Machine: CHAYANIN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run_trained_three_seeds.ps1
+Process ID: 5196
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is .\results\within_domain_trained_full_gpu_3seeds_600ep.log
+  File "C:\Users\33849\Desktop\New folder\sign_metric_learning\tools\run_within_domain_trained.py", line 113, in run_exp
+eriment
+    labels_for(train_ds),
+    ~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\33849\Desktop\New folder\sign_metric_learning\tools\run_within_domain_trained.py", line 93, in labels_f
+or
+    return [dataset[i][1] for i in range(len(dataset))]
+            ~~~~~~~^^^
+  File "C:\Users\33849\Desktop\New folder\sign_metric_learning\data\datasets.py", line 126, in __getitem__
+    lm = np.load(path).astype(np.float32)  # (21, 3)
+         ~~~~~~~^^^^^^
+  File "C:\Users\33849\Desktop\New folder\sign_metric_learning\.venv\Lib\site-packages\numpy\lib\_npyio_impl.py", line 4
+54, in load
+    fid = stack.enter_context(open(os.fspath(file), "rb"))
+                              ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+PS>TerminatingError(): "The pipeline has been stopped."
+**********************
+Windows PowerShell transcript end
+End time: 20260514052714
+**********************
+**********************
+Windows PowerShell transcript start
+Start time: 20260514052722
+Username: CHAYANIN\33849
+RunAs User: CHAYANIN\33849
+Configuration Name: 
+Machine: CHAYANIN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run_trained_three_seeds.ps1
+Process ID: 21908
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is .\results\within_domain_trained_full_gpu_3seeds_600ep.log
+
+**********************
+Windows PowerShell transcript end
+End time: 20260514053306
+**********************
+**********************
+Windows PowerShell transcript start
+Start time: 20260514053325
+Username: CHAYANIN\33849
+RunAs User: CHAYANIN\33849
+Configuration Name: 
+Machine: CHAYANIN (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run_trained_three_seeds.ps1
+Process ID: 21232
+PSVersion: 5.1.26100.8457
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8457
+BuildVersion: 10.0.26100.8457
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is .\results\within_domain_trained_full_gpu_3seeds_600ep.log
+
+**********************
+Windows PowerShell transcript end
+End time: 20260514111516
+**********************

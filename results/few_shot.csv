@@ -1,0 +1,5 @@
+metric,value
+accuracy,1.0
+ci,0.0
+loss,3.6148054505247273e-05
+BdSL,5,finetune_last,1.0000,0.0000

@@ -1,0 +1,111 @@
+{
+  "timestamp": "2026-02-23T04:51:08.184793+00:00",
+  "python_version": "3.13.11",
+  "platform": "Linux-6.17.0-14-generic-x86_64-with-glibc2.39",
+  "cwd": "/home/chyanin/sign_metric_learning",
+  "packages": {
+    "torch": "2.10.0+cpu",
+    "numpy": "2.4.2",
+    "scipy": "1.17.0",
+    "sklearn": "1.8.0",
+    "matplotlib": "3.10.8",
+    "mediapipe": "0.10.32",
+    "cv2": "4.13.0",
+    "yaml": "6.0.3",
+    "tqdm": "4.67.1"
+  },
+  "git_hash": "0ee4cdbbcd7ca320aa723377d00dfed5b9da926d",
+  "git_dirty": true,
+  "config_hash": "6434910bcef2db83",
+  "seed": 42,
+  "cli_args": [
+    "tools/write_manifest.py",
+    "--config",
+    "configs/base.yaml",
+    "--output",
+    "results/manifest.json"
+  ],
+  "config": {
+    "seed": 42,
+    "deterministic": true,
+    "dataset": {
+      "name": "ASL",
+      "root": "data/processed/asl_alphabet_split",
+      "num_classes": 29,
+      "num_landmarks": 21,
+      "landmark_dim": 3,
+      "normalize_translation": true,
+      "normalize_scale": true
+    },
+    "representation": "raw",
+    "model": {
+      "encoder": "transformer",
+      "embedding_dim": 128,
+      "mlp": {
+        "hidden_dims": [
+          256,
+          256
+        ],
+        "dropout": 0.3
+      },
+      "transformer": {
+        "num_heads": 4,
+        "num_layers": 2,
+        "dim_feedforward": 256,
+        "dropout": 0.1
+      },
+      "gcn": {
+        "hidden_dim": 128,
+        "num_layers": 3,
+        "dropout": 0.2
+      }
+    },
+    "few_shot": {
+      "method": "prototypical",
+      "n_way": 5,
+      "k_shot": 5,
+      "q_query": 15,
+      "episodes_train": 1000,
+      "episodes_eval": 1000
+    },
+    "loss": {
+      "name": "supcon",
+      "triplet": {
+        "margin": 0.5,
+        "mining": "semi_hard"
+      },
+      "supcon": {
+        "temperature": 0.07
+      },
+      "arcface": {
+        "scale": 30.0,
+        "margin": 0.5
+      }
+    },
+    "training": {
+      "optimizer": "adamw",
+      "lr": 0.0001,
+      "weight_decay": 0.0001,
+      "batch_size": 64,
+      "epochs": 100,
+      "scheduler": "cosine",
+      "patience": 15,
+      "grad_clip": 1.0,
+      "num_workers": 0
+    },
+    "adaptation": {
+      "mode": "finetune_last",
+      "lr": 0.0001,
+      "epochs": 50,
+      "shots": [
+        1,
+        5
+      ]
+    },
+    "output_dir": "results",
+    "checkpoint_dir": "results/checkpoints",
+    "log_file": "results/train.log",
+    "save_best_only": true,
+    "device": "auto"
+  }
+}

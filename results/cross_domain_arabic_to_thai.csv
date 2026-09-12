@@ -1,0 +1,7 @@
+source,target,encoder,representation,mode,k_shot,n_way,q_query,episodes,seed,accuracy_mean,ci95
+arabic_sign_alphabet,thai_fingerspelling,mlp,raw,frozen,5,5,15,600,42,0.5459,0.009
+arabic_sign_alphabet,thai_fingerspelling,mlp,raw,adapted,5,5,15,600,42,0.5884,0.0086
+arabic_sign_alphabet,thai_fingerspelling,mlp,angle,frozen,5,5,15,600,42,0.5001,0.0079
+arabic_sign_alphabet,thai_fingerspelling,mlp,angle,adapted,5,5,15,600,42,0.5656,0.0078
+arabic_sign_alphabet,thai_fingerspelling,mlp,raw_angle,frozen,5,5,15,600,42,0.5283,0.0084
+arabic_sign_alphabet,thai_fingerspelling,mlp,raw_angle,adapted,5,5,15,600,42,0.5924,0.0085

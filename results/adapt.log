@@ -1,0 +1,9 @@
+[2026-02-22 15:50:08] INFO - Loaded pretrained checkpoint: results/checkpoints/best_asl.pt
+[2026-02-22 15:50:08] INFO - Adaptation mode: finetune_last (256/289,920 trainable)
+[2026-02-22 15:50:08] INFO - Adapting to BdSL with 1-shot, mode=finetune_last
+[2026-02-22 15:57:16] INFO - Loaded pretrained checkpoint: results/checkpoints/best_asl.pt
+[2026-02-22 15:57:16] INFO - Adaptation mode: finetune_last (256/289,920 trainable)
+[2026-02-22 15:57:16] INFO - Adapting to BdSL with 5-shot, mode=finetune_last
+[2026-02-22 15:59:48] INFO - Adapted accuracy: 1.0000 ± 0.0000
+[2026-02-22 15:59:51] INFO - Results appended to results/few_shot.csv
+[2026-02-22 15:59:51] INFO - Adapted model saved to results/checkpoints/adapted_bdsl_5shot_finetune_last.pt

@@ -1,168 +1,103 @@
 """
-Prototypical Network for few-shot classification.
+Prototypical Networks for few-shot sign language recognition.
 
-Classifies query samples by computing Euclidean distance to class prototypes
-(centroids of support set embeddings). No learnable parameters are introduced
-beyond those of the encoder.
-
-References:
-    Section 3.3 — Model Architecture (Prototypical Network head)
-    Section 3.4 — Few-Shot Evaluation Protocol
-    Snell et al. (2017) — Prototypical Networks for Few-Shot Learning
+Reference: Snell et al., "Prototypical Networks for Few-shot Learning", NeurIPS 2017.
 """
+
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Optional
 
 
 class PrototypicalNetwork(nn.Module):
-    """
-    Prototypical Network wrapper around an encoder.
+    """Prototypical Network wrapper around an arbitrary encoder backbone.
 
-    Given an N-way K-shot episode:
-        1. Encode all support and query samples using the encoder
-        2. Compute class prototypes as mean of K support embeddings
-        3. Classify queries by nearest prototype (Euclidean distance)
-        4. Apply softmax over negative squared distances for probabilities
+    During an episode the support set is encoded, class prototypes are
+    computed as mean embeddings, and query samples are classified based on
+    negative Euclidean distance to each prototype.
 
     Args:
-        encoder: nn.Module that maps input features to embedding space.
-        distance: Distance metric ('euclidean'). Only Euclidean is used in the paper.
+        encoder: Backbone that maps input to ``(B, D)`` embedding.
+        distance: Distance metric — ``'euclidean'`` or ``'cosine'``.
     """
 
-    def __init__(self, encoder: nn.Module, distance: str = "euclidean"):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        distance: str = "euclidean",
+    ) -> None:
         super().__init__()
         self.encoder = encoder
         self.distance = distance
 
     def compute_prototypes(
         self,
-        support_embeddings: torch.Tensor,
-        support_labels: torch.Tensor,
+        support_x: torch.Tensor,
+        support_y: torch.Tensor,
         n_way: int,
     ) -> torch.Tensor:
-        """
-        Compute class prototypes as the mean of support embeddings.
+        """Compute class prototypes from the support set.
 
         Args:
-            support_embeddings: Tensor of shape (N*K, D) — encoded support samples.
-            support_labels: Tensor of shape (N*K,) — labels in {0,...,N-1}.
-            n_way: Number of classes (N).
+            support_x: Support embeddings ``(N_s, D)``.
+            support_y: Support labels ``(N_s,)`` with values in ``[0, n_way)``.
+            n_way: Number of classes.
 
         Returns:
-            Prototypes tensor of shape (N, D).
+            Prototypes ``(n_way, D)``.
         """
-        prototypes = torch.zeros(
-            n_way,
-            support_embeddings.size(-1),
-            device=support_embeddings.device,
-            dtype=support_embeddings.dtype,
-        )
-
-        for i in range(n_way):
-            mask = support_labels == i
-            prototypes[i] = support_embeddings[mask].mean(dim=0)
-
+        D = support_x.size(-1)
+        prototypes = torch.zeros(n_way, D, device=support_x.device)
+        for c in range(n_way):
+            mask = support_y == c
+            prototypes[c] = support_x[mask].mean(dim=0)
         return prototypes
-
-    def compute_distances(
-        self,
-        query_embeddings: torch.Tensor,
-        prototypes: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Compute squared Euclidean distances from queries to prototypes.
-
-        Args:
-            query_embeddings: Tensor of shape (N*Q, D).
-            prototypes: Tensor of shape (N, D).
-
-        Returns:
-            Distance matrix of shape (N*Q, N) — squared Euclidean distances.
-        """
-        # Expand for broadcasting:
-        # query: (N*Q, 1, D), prototypes: (1, N, D)
-        # diff: (N*Q, N, D), distances: (N*Q, N)
-        diff = query_embeddings.unsqueeze(1) - prototypes.unsqueeze(0)
-        distances = (diff ** 2).sum(dim=-1)
-        return distances
 
     def forward(
         self,
-        support_features: torch.Tensor,
-        support_labels: torch.Tensor,
-        query_features: torch.Tensor,
+        support_x: torch.Tensor,
+        support_y: torch.Tensor,
+        query_x: torch.Tensor,
         n_way: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Forward pass: encode, compute prototypes, classify queries.
+    ) -> torch.Tensor:
+        """Forward pass for one episode.
 
         Args:
-            support_features: Tensor of shape (N*K, input_dim) — support features.
-            support_labels: Tensor of shape (N*K,) — support labels in {0,...,N-1}.
-            query_features: Tensor of shape (N*Q, input_dim) — query features.
-            n_way: Number of classes (N).
+            support_x: Support inputs.
+            support_y: Support labels in ``[0, n_way)``.
+            query_x: Query inputs.
+            n_way: Number of classes.
 
         Returns:
-            log_probabilities: Tensor of shape (N*Q, N) — log-softmax over classes.
-            predictions: Tensor of shape (N*Q,) — predicted class indices.
-            distances: Tensor of shape (N*Q, N) — squared Euclidean distances.
+            Log-probabilities over *n_way* classes for each query, ``(N_q, n_way)``.
         """
-        # Encode support and query samples
-        support_embeddings = self.encoder(support_features)
-        query_embeddings = self.encoder(query_features)
+        z_support = self.encoder(support_x)  # (N_s, D)
+        z_query = self.encoder(query_x)      # (N_q, D)
 
-        # Compute class prototypes (mean of support embeddings)
-        prototypes = self.compute_prototypes(
-            support_embeddings, support_labels, n_way
-        )
+        prototypes = self.compute_prototypes(z_support, support_y, n_way)  # (n_way, D)
 
-        # Compute distances from queries to prototypes
-        distances = self.compute_distances(query_embeddings, prototypes)
+        if self.distance == "euclidean":
+            # Negative squared Euclidean distance
+            dists = torch.cdist(z_query, prototypes, p=2)  # (N_q, n_way)
+            logits = -dists
+        elif self.distance == "cosine":
+            z_query_n = F.normalize(z_query, dim=-1)
+            prototypes_n = F.normalize(prototypes, dim=-1)
+            logits = z_query_n @ prototypes_n.t()  # (N_q, n_way)
+        else:
+            raise ValueError(f"Unknown distance: {self.distance}")
 
-        # Negative distances → log-softmax for probabilities
-        log_probs = F.log_softmax(-distances, dim=-1)
+        return F.log_softmax(logits, dim=-1)
 
-        # Predictions: nearest prototype
-        predictions = distances.argmin(dim=-1)
-
-        return log_probs, predictions, distances
-
-    def encode(self, features: torch.Tensor) -> torch.Tensor:
-        """
-        Encode features without classification (for SupCon loss).
+    def get_embeddings(self, x: torch.Tensor) -> torch.Tensor:
+        """Extract embeddings without episodic computation.
 
         Args:
-            features: Tensor of shape (batch_size, input_dim).
+            x: Input tensor.
 
         Returns:
-            Embeddings tensor of shape (batch_size, embedding_dim).
+            Embeddings ``(B, D)``.
         """
-        return self.encoder(features)
-
-    def classify_with_prototypes(
-        self,
-        query_features: torch.Tensor,
-        prototypes: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Classify queries using pre-computed prototypes.
-
-        Useful for evaluation where prototypes are computed once from
-        the support set and reused across queries.
-
-        Args:
-            query_features: Tensor of shape (Q, input_dim).
-            prototypes: Tensor of shape (N, D).
-
-        Returns:
-            log_probabilities: Tensor of shape (Q, N).
-            predictions: Tensor of shape (Q,).
-        """
-        query_embeddings = self.encoder(query_features)
-        distances = self.compute_distances(query_embeddings, prototypes)
-        log_probs = F.log_softmax(-distances, dim=-1)
-        predictions = distances.argmin(dim=-1)
-        return log_probs, predictions
+        return self.encoder(x)

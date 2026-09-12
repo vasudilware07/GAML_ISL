@@ -1,0 +1,9 @@
+dataset,representation,method,k_shot,accuracy,ci
+asl_alphabet,raw,input_space_proto,5,0.9507,0.0044
+asl_alphabet,angle,input_space_proto,5,0.8944,0.0059
+libras_alphabet,raw,input_space_proto,5,0.8096,0.008
+libras_alphabet,angle,input_space_proto,5,0.9416,0.0048
+arabic_sign_alphabet,raw,input_space_proto,5,0.6498,0.0087
+arabic_sign_alphabet,angle,input_space_proto,5,0.905,0.0056
+thai_fingerspelling,raw,input_space_proto,5,0.4758,0.0077
+thai_fingerspelling,angle,input_space_proto,5,0.5275,0.0081

@@ -1,407 +1,396 @@
 """
-Episodic training loop for Prototypical Networks.
-
-Trains a Prototypical Network encoder using a combined loss:
-    L_total = L_episode + λ * L_supcon
-
-where L_episode is the negative log-likelihood on ProtoNet log-probabilities
-and L_supcon is the supervised contrastive loss (λ=0.5, τ=0.07).
-
-Optimisation: AdamW (lr=1e-4, weight_decay=1e-4), gradient clipping at 1.0,
-cosine annealing schedule, early stopping with patience 15.
+Training script for episodic metric learning on sign language landmarks.
 
 Usage:
-    python train.py --config configs/default.yaml --dataset asl --repr angle --encoder mlp
-
-References:
-    Section 3.5 — Implementation Details (Training and losses)
+    python train.py --config configs/base.yaml --dataset ASL
 """
 
 import argparse
-import json
 import os
-import random
-import time
+import sys
 from pathlib import Path
+from typing import Dict, Optional
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import yaml
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from data.dataset import SplitLandmarkDataset
-from data.episodes import EpisodicSampler, split_support_query
-from data.representation import get_input_dim
-from losses.supcon import SupConLoss
-from models import create_model, count_parameters
+from data.datasets import LandmarkDataset, SplitLandmarkDataset, SyntheticLandmarkDataset
+from data.episodes import EpisodicSampler, split_support_query, collate_episode
+from losses.supcon import build_loss
+from models import build_encoder, build_few_shot_model
+from utils.logger import get_logger
+from utils.metrics import accuracy, few_shot_accuracy_with_ci
+from utils.seed import set_seed
 
 
-def set_seed(seed: int):
-    """Set all random seeds for full reproducibility."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+def load_config(path: str) -> dict:
+    """Load a YAML configuration file.
 
-
-def load_config(config_path: str, overrides: dict = None) -> dict:
-    """Load YAML config with optional overrides."""
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
-
-    if overrides:
-        config.update(overrides)
-
-    return config
-
-
-def train_epoch(
-    model: nn.Module,
-    dataset: SplitLandmarkDataset,
-    optimizer: torch.optim.Optimizer,
-    scheduler,
-    supcon_loss_fn: SupConLoss,
-    config: dict,
-    device: torch.device,
-    epoch: int,
-) -> dict:
-    """
-    Run one training epoch (multiple episodes).
+    Args:
+        path: Path to YAML config.
 
     Returns:
-        Dictionary with epoch metrics: loss, accuracy, episode_loss, supcon_loss.
+        Configuration dictionary.
+    """
+    with open(path, "r") as f:
+        cfg = yaml.safe_load(f)
+    return cfg
+
+
+def get_device(cfg: dict) -> torch.device:
+    """Resolve device from config.
+
+    Args:
+        cfg: Config dict with ``device`` key.
+
+    Returns:
+        ``torch.device``
+    """
+    dev = cfg.get("device", "auto")
+    if dev == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(dev)
+
+
+def get_dataset(cfg: dict, split: str = "train", use_json_splits: bool = False):
+    """Build dataset from config. Falls back to synthetic if real data unavailable.
+
+    Respects the ``DATA_ROOT`` environment variable: if set, the dataset root
+    path is resolved relative to ``$DATA_ROOT`` instead of the working dir.
+
+    When *use_json_splits* is ``True`` the samples are controlled by the JSON
+    split file in ``splits/<name>_<split>.json`` (produced by
+    ``tools/make_splits.py``).  The data root is then the **flat** preprocessed
+    directory (without ``/train`` or ``/test`` suffix).
+
+    Args:
+        cfg: Config dict.
+        split: ``'train'`` or ``'test'``.
+        use_json_splits: Use JSON-based split files instead of directory splits.
+
+    Returns:
+        Dataset instance.
+    """
+    ds_cfg = cfg["dataset"]
+    representation = cfg.get("representation", "raw")
+    dataset_name = ds_cfg.get("name", "unknown").lower()
+
+    # ── JSON-based splits (new protocol) ─────────────────────────────────
+    if use_json_splits:
+        raw_root = ds_cfg["root"]
+        if "DATA_ROOT" in os.environ and not Path(raw_root).is_absolute():
+            flat_root = Path(os.environ["DATA_ROOT"]) / raw_root
+        else:
+            flat_root = Path(raw_root)
+        # If root points at a *_split dir, strip the suffix to get the flat dir
+        if flat_root.name.endswith("_split"):
+            flat_root = flat_root.parent / flat_root.name[: -len("_split")]
+        if flat_root.exists():
+            return SplitLandmarkDataset(
+                dataset_name=dataset_name,
+                split=split,
+                data_root=str(flat_root),
+                representation=representation,
+            )
+        # fall through to synthetic
+
+    # ── Directory-based splits (legacy) ──────────────────────────────────
+    raw_root = ds_cfg["root"]
+    if "DATA_ROOT" in os.environ and not Path(raw_root).is_absolute():
+        root = Path(os.environ["DATA_ROOT"]) / raw_root / split
+    else:
+        root = Path(raw_root) / split
+
+    if root.exists() and any(root.iterdir()):
+        return LandmarkDataset(
+            root=str(root),
+            representation=representation,
+        )
+    else:
+        # Fallback: synthetic dataset for demo / testing
+        n_cls = ds_cfg.get("num_classes", 100) if split == "train" else min(ds_cfg.get("num_classes", 60), 60)
+        return SyntheticLandmarkDataset(
+            num_classes=n_cls,
+            samples_per_class=30 if split == "train" else 20,
+            representation=representation,
+        )
+
+
+def train_one_epoch(
+    model,
+    dataloader,
+    loss_fn,
+    optimizer,
+    device,
+    n_way: int,
+    k_shot: int,
+    q_query: int,
+    grad_clip: float = 1.0,
+) -> Dict[str, float]:
+    """Run one training epoch over episodic batches.
+
+    Args:
+        model: Few-shot model.
+        dataloader: Episodic DataLoader.
+        loss_fn: Metric learning loss (used for embedding-level loss).
+        optimizer: Optimiser.
+        device: Torch device.
+        n_way: N-way.
+        k_shot: K-shot.
+        q_query: Q-query.
+        grad_clip: Gradient clipping norm.
+
+    Returns:
+        Dict with ``'loss'`` and ``'accuracy'`` averages.
     """
     model.train()
-
-    n_way = config["n_way"]
-    k_shot = config["k_shot"]
-    q_query = config["q_query"]
-    episodes_per_epoch = config["episodes_per_epoch"]
-    supcon_weight = config["supcon_weight"]
-    grad_clip = config["grad_clip"]
-    seed = config["seed"]
-
     total_loss = 0.0
-    total_episode_loss = 0.0
-    total_supcon_loss = 0.0
-    total_correct = 0
-    total_queries = 0
+    total_acc = 0.0
+    num_episodes = 0
 
-    # Create episodic sampler for this epoch
-    epoch_seed = seed + epoch * episodes_per_epoch
-
-    for ep_idx in range(episodes_per_epoch):
-        # Create episode
-        from data.episodes import create_episode_batch
-
-        support_features, support_labels, query_features, query_labels = (
-            create_episode_batch(
-                dataset, n_way, k_shot, q_query,
-                seed=epoch_seed, episode_idx=ep_idx, device=device,
-            )
+    for batch in tqdm(dataloader, desc="Training", leave=False):
+        data, labels = batch
+        data, labels = data.to(device), labels.to(device)
+        support_x, support_y, query_x, query_y = split_support_query(
+            (data, labels), n_way, k_shot, q_query,
         )
+        support_x = support_x.to(device)
+        support_y = support_y.to(device)
+        query_x = query_x.to(device)
+        query_y = query_y.to(device)
 
-        # Forward pass through ProtoNet
-        log_probs, predictions, distances = model(
-            support_features, support_labels, query_features, n_way
-        )
+        # Episodic forward
+        log_probs = model(support_x, support_y, query_x, n_way)
+        cls_loss = F.nll_loss(log_probs, query_y)
 
-        # Episode classification loss (NLL)
-        episode_loss = F.nll_loss(log_probs, query_labels)
+        # Metric learning loss on support + query embeddings
+        all_x = torch.cat([support_x, query_x], dim=0)
+        all_y = torch.cat([support_y, query_y], dim=0)
+        all_emb = model.get_embeddings(all_x)
+        metric_loss = loss_fn(all_emb, all_y)
 
-        # Supervised contrastive loss on support+query embeddings
-        all_features = torch.cat([support_features, query_features], dim=0)
-        all_labels = torch.cat([support_labels, query_labels], dim=0)
-        all_embeddings = model.encode(all_features)
-        supcon_loss = supcon_loss_fn(all_embeddings, all_labels)
+        loss = cls_loss + 0.5 * metric_loss
 
-        # Combined loss
-        loss = episode_loss + supcon_weight * supcon_loss
-
-        # Backward pass
         optimizer.zero_grad()
         loss.backward()
-
-        # Gradient clipping
         if grad_clip > 0:
-            nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
 
-        # Track metrics
+        acc = accuracy(log_probs, query_y)
         total_loss += loss.item()
-        total_episode_loss += episode_loss.item()
-        total_supcon_loss += supcon_loss.item()
-        total_correct += (predictions == query_labels).sum().item()
-        total_queries += query_labels.size(0)
-
-    # Update learning rate
-    if scheduler is not None:
-        scheduler.step()
-
-    avg_loss = total_loss / episodes_per_epoch
-    avg_episode_loss = total_episode_loss / episodes_per_epoch
-    avg_supcon_loss = total_supcon_loss / episodes_per_epoch
-    accuracy = total_correct / total_queries * 100
+        total_acc += acc
+        num_episodes += 1
 
     return {
-        "loss": avg_loss,
-        "episode_loss": avg_episode_loss,
-        "supcon_loss": avg_supcon_loss,
-        "accuracy": accuracy,
+        "loss": total_loss / max(num_episodes, 1),
+        "accuracy": total_acc / max(num_episodes, 1),
     }
 
 
-def validate(
-    model: nn.Module,
-    dataset: SplitLandmarkDataset,
-    config: dict,
-    device: torch.device,
-    num_episodes: int = 100,
-    seed: int = 99999,
-) -> dict:
-    """
-    Validate model on a set of episodes.
+@torch.no_grad()
+def evaluate_episodes(
+    model,
+    dataloader,
+    device,
+    n_way: int,
+    k_shot: int,
+    q_query: int,
+) -> Dict[str, float]:
+    """Evaluate over episodic batches and compute mean accuracy with CI.
+
+    Args:
+        model: Few-shot model.
+        dataloader: Episodic DataLoader.
+        device: Torch device.
+        n_way: N-way.
+        k_shot: K-shot.
+        q_query: Q-query.
 
     Returns:
-        Dictionary with validation accuracy and 95% CI.
+        Dict with ``'accuracy'``, ``'ci'``, and ``'loss'``.
     """
     model.eval()
+    accs = []
+    total_loss = 0.0
 
-    n_way = config["n_way"]
-    k_shot = config["k_shot"]
-    q_query = config["q_query"]
+    for batch in tqdm(dataloader, desc="Evaluating", leave=False):
+        data, labels = batch
+        data, labels = data.to(device), labels.to(device)
+        support_x, support_y, query_x, query_y = split_support_query(
+            (data, labels), n_way, k_shot, q_query,
+        )
+        support_x = support_x.to(device)
+        support_y = support_y.to(device)
+        query_x = query_x.to(device)
+        query_y = query_y.to(device)
 
-    accuracies = []
+        log_probs = model(support_x, support_y, query_x, n_way)
+        loss = F.nll_loss(log_probs, query_y)
+        acc = accuracy(log_probs, query_y)
 
-    with torch.no_grad():
-        for ep_idx in range(num_episodes):
-            from data.episodes import create_episode_batch
+        accs.append(acc)
+        total_loss += loss.item()
 
-            support_features, support_labels, query_features, query_labels = (
-                create_episode_batch(
-                    dataset, n_way, k_shot, q_query,
-                    seed=seed, episode_idx=ep_idx, device=device,
-                )
-            )
-
-            log_probs, predictions, _ = model(
-                support_features, support_labels, query_features, n_way
-            )
-
-            acc = (predictions == query_labels).float().mean().item() * 100
-            accuracies.append(acc)
-
-    accuracies = np.array(accuracies)
-    mean_acc = accuracies.mean()
-    ci_95 = 1.96 * accuracies.std() / np.sqrt(len(accuracies))
-
+    mean_acc, ci = few_shot_accuracy_with_ci(accs)
     return {
         "accuracy": mean_acc,
-        "ci_95": ci_95,
-        "accuracies": accuracies,
+        "ci": ci,
+        "loss": total_loss / max(len(accs), 1),
     }
 
 
-def train(config: dict):
-    """
-    Full training pipeline.
+def main():
+    parser = argparse.ArgumentParser(description="Train sign language metric learning")
+    parser.add_argument("--config", type=str, default="configs/base.yaml")
+    parser.add_argument("--dataset", type=str, default=None, help="Override dataset name")
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--json_splits", action="store_true",
+                        help="Use JSON-based splits from splits/ directory")
+    parser.add_argument("--save", type=str, default=None,
+                        help="Override checkpoint save path")
+    parser.add_argument("--auto_adjust_q", action="store_true",
+                        help="Auto-lower q_query when classes have too few samples")
+    args = parser.parse_args()
 
-    1. Set up data, model, optimizer
-    2. Train episodically with early stopping
-    3. Save best checkpoint
-    """
-    # Setup
-    set_seed(config["seed"])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    cfg = load_config(args.config)
+    if args.dataset:
+        cfg["dataset"]["name"] = args.dataset
+    if args.epochs:
+        cfg["training"]["epochs"] = args.epochs
+    if args.device:
+        cfg["device"] = args.device
 
-    # Dataset
-    dataset_name = config["dataset"]
-    representation = config["representation"]
-    splits_dir = config["splits_dir"]
-    data_dir = config["data_dir"]
+    # Seed & device
+    set_seed(cfg.get("seed", 42), cfg.get("deterministic", True))
+    device = get_device(cfg)
 
-    train_split = os.path.join(splits_dir, f"{dataset_name}_train.json")
-    test_split = os.path.join(splits_dir, f"{dataset_name}_test.json")
+    # Directories
+    os.makedirs(cfg.get("output_dir", "results"), exist_ok=True)
+    os.makedirs(cfg.get("checkpoint_dir", "results/checkpoints"), exist_ok=True)
+    os.makedirs("results/plots", exist_ok=True)
 
-    # Validate no overlap
-    if os.path.exists(train_split) and os.path.exists(test_split):
-        SplitLandmarkDataset.validate_no_overlap(train_split, test_split)
+    logger = get_logger("train", cfg.get("log_file", "results/train.log"))
+    logger.info(f"Config: {cfg}")
+    logger.info(f"Device: {device}")
 
-    train_dataset = SplitLandmarkDataset(
-        data_dir=data_dir,
-        split_file=train_split,
-        representation=representation,
-        normalize=config.get("normalize", True),
+    # Data
+    representation = cfg.get("representation", "raw")
+    use_json = getattr(args, "json_splits", False)
+    train_ds = get_dataset(cfg, split="train", use_json_splits=use_json)
+    test_ds = get_dataset(cfg, split="test", use_json_splits=use_json)
+
+    fs_cfg = cfg["few_shot"]
+    n_way = fs_cfg["n_way"]
+    k_shot = fs_cfg["k_shot"]
+    q_query = fs_cfg["q_query"]
+
+    train_labels = [s[1] if isinstance(s, tuple) else s for s in
+                    [(train_ds[i][1]) for i in range(len(train_ds))]]
+    test_labels = [test_ds[i][1] for i in range(len(test_ds))]
+
+    seed = cfg.get("seed", 42)
+    ds_name = cfg["dataset"].get("name", "unknown").lower()
+    auto_q = getattr(args, "auto_adjust_q", False)
+    train_sampler = EpisodicSampler(
+        train_labels, n_way=n_way, k_shot=k_shot, q_query=q_query,
+        episodes=fs_cfg.get("episodes_train", 1000),
+        seed=seed, auto_adjust_q=auto_q,
+        dataset_name=ds_name, split_name="train",
+    )
+    test_sampler = EpisodicSampler(
+        test_labels, n_way=n_way, k_shot=k_shot, q_query=q_query,
+        episodes=fs_cfg.get("episodes_eval", 1000),
+        seed=seed + 10000, auto_adjust_q=auto_q,
+        dataset_name=ds_name, split_name="test",
     )
 
-    test_dataset = SplitLandmarkDataset(
-        data_dir=data_dir,
-        split_file=test_split,
-        representation=representation,
-        normalize=config.get("normalize", True),
-    )
-
-    print(f"Train dataset: {train_dataset}")
-    print(f"Test dataset:  {test_dataset}")
+    train_loader = DataLoader(train_ds, batch_sampler=train_sampler, collate_fn=collate_episode,
+                              num_workers=cfg["training"].get("num_workers", 0))
+    test_loader = DataLoader(test_ds, batch_sampler=test_sampler, collate_fn=collate_episode,
+                             num_workers=cfg["training"].get("num_workers", 0))
 
     # Model
-    input_dim = get_input_dim(representation)
-    encoder_name = config["encoder"]
+    encoder = build_encoder(cfg, representation)
+    model = build_few_shot_model(cfg, encoder).to(device)
+    logger.info(f"Model: {cfg['few_shot']['method']} with {cfg['model']['encoder']} encoder")
+    total_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Total parameters: {total_params:,}")
 
-    model = create_model(
-        encoder_name=encoder_name,
-        input_dim=input_dim,
-        embedding_dim=config["embedding_dim"],
-        hidden_dim=config["hidden_dim"],
-        dropout=config.get("dropout", 0.3),
-        n_heads=config.get("transformer_heads", 4),
-        n_layers=config.get("transformer_layers", 2),
-        transformer_dropout=config.get("transformer_dropout", 0.1),
-        representation=representation,
-        distance=config.get("distance", "euclidean"),
-    )
-    model = model.to(device)
+    # Loss
+    loss_fn = build_loss(cfg).to(device)
 
-    num_params = count_parameters(model)
-    print(f"Model: {encoder_name} / {representation} — {num_params:,} parameters")
-
-    # Optimizer
+    # Optimiser
+    t_cfg = cfg["training"]
     optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config["lr"],
-        weight_decay=config["weight_decay"],
+        model.parameters(), lr=t_cfg["lr"], weight_decay=t_cfg["weight_decay"],
     )
 
-    # Cosine annealing scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=config["max_epochs"],
-    )
+    # Scheduler
+    scheduler = None
+    if t_cfg.get("scheduler") == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=t_cfg["epochs"],
+        )
+    elif t_cfg.get("scheduler") == "step":
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
-    # SupCon loss
-    supcon_loss_fn = SupConLoss(temperature=config["supcon_temperature"])
-
-    # Checkpoint directory
-    checkpoint_dir = Path(config["checkpoint_dir"])
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_name = f"{dataset_name}_{encoder_name}_{representation}"
-    best_checkpoint_path = checkpoint_dir / f"{checkpoint_name}_best.pt"
-
-    # Training loop with early stopping
-    best_val_acc = 0.0
+    # Training loop
+    best_acc = 0.0
     patience_counter = 0
-    patience = config["patience"]
+    patience = t_cfg.get("patience", 15)
 
-    print(f"\nTraining for up to {config['max_epochs']} epochs "
-          f"(patience={patience})...\n")
+    for epoch in range(1, t_cfg["epochs"] + 1):
+        logger.info(f"Epoch {epoch}/{t_cfg['epochs']}")
 
-    for epoch in range(1, config["max_epochs"] + 1):
-        start_time = time.time()
+        train_metrics = train_one_epoch(
+            model, train_loader, loss_fn, optimizer, device,
+            n_way, k_shot, q_query, t_cfg.get("grad_clip", 1.0),
+        )
+        logger.info(f"  Train loss: {train_metrics['loss']:.4f}  acc: {train_metrics['accuracy']:.4f}")
 
-        # Train
-        train_metrics = train_epoch(
-            model, train_dataset, optimizer, scheduler,
-            supcon_loss_fn, config, device, epoch,
+        eval_metrics = evaluate_episodes(model, test_loader, device, n_way, k_shot, q_query)
+        logger.info(
+            f"  Eval  acc: {eval_metrics['accuracy']:.4f} ± {eval_metrics['ci']:.4f}  "
+            f"loss: {eval_metrics['loss']:.4f}"
         )
 
-        # Validate
-        val_metrics = validate(
-            model, test_dataset, config, device,
-            num_episodes=100, seed=99999,
-        )
+        if scheduler:
+            scheduler.step()
 
-        elapsed = time.time() - start_time
-
-        print(
-            f"Epoch {epoch:3d} | "
-            f"Train Loss: {train_metrics['loss']:.4f} "
-            f"(ep: {train_metrics['episode_loss']:.4f}, "
-            f"sc: {train_metrics['supcon_loss']:.4f}) | "
-            f"Train Acc: {train_metrics['accuracy']:.1f}% | "
-            f"Val Acc: {val_metrics['accuracy']:.1f}±{val_metrics['ci_95']:.1f}% | "
-            f"{elapsed:.1f}s"
-        )
-
-        # Early stopping check
-        if val_metrics["accuracy"] > best_val_acc:
-            best_val_acc = val_metrics["accuracy"]
+        # Checkpoint best
+        if eval_metrics["accuracy"] > best_acc:
+            best_acc = eval_metrics["accuracy"]
             patience_counter = 0
-
-            # Save best checkpoint
+            ckpt_path = (
+                args.save
+                if getattr(args, "save", None)
+                else os.path.join(
+                    cfg.get("checkpoint_dir", "results/checkpoints"),
+                    f"best_{cfg['dataset']['name'].lower()}.pt",
+                )
+            )
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "val_accuracy": best_val_acc,
-                "config": config,
-            }, best_checkpoint_path)
+                "best_accuracy": best_acc,
+                "config": cfg,
+            }, ckpt_path)
+            logger.info(f"  ★ New best model saved ({best_acc:.4f}) → {ckpt_path}")
         else:
             patience_counter += 1
             if patience_counter >= patience:
-                print(f"\nEarly stopping at epoch {epoch} "
-                      f"(no improvement for {patience} epochs)")
+                logger.info(f"Early stopping at epoch {epoch}")
                 break
 
-    print(f"\nBest validation accuracy: {best_val_acc:.1f}%")
-    print(f"Checkpoint saved: {best_checkpoint_path}")
-
-    return model, best_val_acc
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Train Prototypical Network for few-shot SLR."
-    )
-    parser.add_argument(
-        "--config", type=str, default="configs/default.yaml",
-        help="Path to YAML configuration file.",
-    )
-    parser.add_argument("--dataset", type=str, help="Dataset name override.")
-    parser.add_argument("--repr", type=str, help="Representation override.")
-    parser.add_argument("--encoder", type=str, help="Encoder override.")
-    parser.add_argument("--k_shot", type=int, help="K-shot override.")
-    parser.add_argument("--max_epochs", type=int, help="Max epochs override.")
-    parser.add_argument("--seed", type=int, help="Seed override.")
-    parser.add_argument("--data_dir", type=str, help="Data directory override.")
-    parser.add_argument("--normalize", type=bool, default=None,
-                        help="Normalization override (for ablation).")
-
-    args = parser.parse_args()
-
-    # Load config
-    config = load_config(args.config)
-
-    # Apply overrides
-    if args.dataset:
-        config["dataset"] = args.dataset
-        # Also load dataset-specific config if available
-        ds_config_path = f"configs/{args.dataset}.yaml"
-        if os.path.exists(ds_config_path):
-            with open(ds_config_path, "r") as f:
-                ds_config = yaml.safe_load(f)
-            config.update(ds_config)
-    if args.repr:
-        config["representation"] = args.repr
-    if args.encoder:
-        config["encoder"] = args.encoder
-    if args.k_shot is not None:
-        config["k_shot"] = args.k_shot
-    if args.max_epochs is not None:
-        config["max_epochs"] = args.max_epochs
-    if args.seed is not None:
-        config["seed"] = args.seed
-    if args.data_dir:
-        config["data_dir"] = args.data_dir
-    if args.normalize is not None:
-        config["normalize"] = args.normalize
-
-    train(config)
+    logger.info(f"Training complete. Best accuracy: {best_acc:.4f}")
+    return best_acc
 
 
 if __name__ == "__main__":

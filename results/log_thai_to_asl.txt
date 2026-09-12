@@ -1,0 +1,39 @@
+
+  Source dataset: thai_fingerspelling
+
+============================================================
+  Pretraining: mlp / raw on thai_fingerspelling
+============================================================
+  Pretrained in 3.6s
+
+  → thai_fingerspelling → asl_alphabet | mlp/raw | mode=frozen
+    Acc: 0.9451 ± 0.0040
+
+  → thai_fingerspelling → asl_alphabet | mlp/raw | mode=adapted
+    Acc: 0.9631 ± 0.0034
+
+============================================================
+  Pretraining: mlp / angle on thai_fingerspelling
+============================================================
+  Pretrained in 8.0s
+
+  → thai_fingerspelling → asl_alphabet | mlp/angle | mode=frozen
+    Acc: 0.8871 ± 0.0060
+
+  → thai_fingerspelling → asl_alphabet | mlp/angle | mode=adapted
+    Acc: 0.8990 ± 0.0058
+
+============================================================
+  Pretraining: mlp / raw_angle on thai_fingerspelling
+============================================================
+  Pretrained in 9.3s
+
+  → thai_fingerspelling → asl_alphabet | mlp/raw_angle | mode=frozen
+    Acc: 0.9508 ± 0.0037
+
+  → thai_fingerspelling → asl_alphabet | mlp/raw_angle | mode=adapted
+    Acc: 0.9585 ± 0.0039
+
+============================================================
+  Saved 6 rows to results/cross_domain_thai_to_asl.csv
+============================================================

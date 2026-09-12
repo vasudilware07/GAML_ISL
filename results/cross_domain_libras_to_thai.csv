@@ -1,0 +1,7 @@
+source,target,encoder,representation,mode,k_shot,n_way,q_query,episodes,seed,accuracy_mean,ci95
+libras_alphabet,thai_fingerspelling,mlp,raw,frozen,5,5,15,600,42,0.5106,0.008
+libras_alphabet,thai_fingerspelling,mlp,raw,adapted,5,5,15,600,42,0.5586,0.008
+libras_alphabet,thai_fingerspelling,mlp,angle,frozen,5,5,15,600,42,0.4953,0.008
+libras_alphabet,thai_fingerspelling,mlp,angle,adapted,5,5,15,600,42,0.553,0.0078
+libras_alphabet,thai_fingerspelling,mlp,raw_angle,frozen,5,5,15,600,42,0.5218,0.008
+libras_alphabet,thai_fingerspelling,mlp,raw_angle,adapted,5,5,15,600,42,0.5735,0.0083

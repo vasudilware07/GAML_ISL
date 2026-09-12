@@ -1,0 +1,86 @@
+# =============================================================================
+# Geometry-Aware Metric Learning for Cross-Lingual Few-Shot Sign Language Recognition
+# Base Configuration
+# =============================================================================
+
+seed: 42
+deterministic: true
+
+# ── Dataset ──────────────────────────────────────────────────────────────────
+dataset:
+  name: "ASL"                     # ASL | Thai | LIBRAS | Arabic
+  root: "data/processed/asl_alphabet_split"
+  num_classes: 29
+  num_landmarks: 21
+  landmark_dim: 3
+  normalize_translation: true     # wrist-centred
+  normalize_scale: true           # divide by hand span
+
+# ── Representation ───────────────────────────────────────────────────────────
+representation: "raw"             # raw | pairwise | graph
+
+# ── Model ────────────────────────────────────────────────────────────────────
+model:
+  encoder: "transformer"          # mlp | transformer | gcn
+  embedding_dim: 128
+  mlp:
+    hidden_dims: [256, 256]
+    dropout: 0.3
+  transformer:
+    num_heads: 4
+    num_layers: 2
+    dim_feedforward: 256
+    dropout: 0.1
+  gcn:
+    hidden_dim: 128
+    num_layers: 3
+    dropout: 0.2
+
+# ── Few-Shot ─────────────────────────────────────────────────────────────────
+few_shot:
+  method: "prototypical"          # prototypical (evaluated) | siamese | matching (available, not evaluated)
+  n_way: 5
+  k_shot: 5
+  q_query: 15
+  episodes_train: 1000
+  episodes_eval: 1000
+
+# ── Loss ─────────────────────────────────────────────────────────────────────
+loss:
+  name: "supcon"                  # supcon (used) | triplet | arcface (available, not evaluated)
+  triplet:
+    margin: 0.5
+    mining: "semi_hard"           # hard | semi_hard | all
+  supcon:
+    temperature: 0.07
+  arcface:
+    scale: 30.0
+    margin: 0.50
+
+# ── Training ─────────────────────────────────────────────────────────────────
+training:
+  optimizer: "adamw"
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  batch_size: 64
+  epochs: 100
+  scheduler: "cosine"             # cosine | step | none
+  patience: 15                    # early stopping patience
+  grad_clip: 1.0
+  num_workers: 0
+
+# ── Adaptation ───────────────────────────────────────────────────────────────
+adaptation:
+  mode: "finetune_last"           # freeze | finetune_last | full_finetune
+  lr: 1.0e-4
+  epochs: 50
+  shots: [1, 5]
+
+# ── Logging / Checkpoints ───────────────────────────────────────────────────
+output_dir: "results"
+checkpoint_dir: "results/checkpoints"
+log_file: "results/train.log"
+save_best_only: true
+
+# ── Device ───────────────────────────────────────────────────────────────────
+device: "auto"                    # auto | cuda | cpu

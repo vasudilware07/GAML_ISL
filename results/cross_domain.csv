@@ -1,0 +1,5 @@
+source_dataset,target_dataset,encoder,representation,k_shot,n_way,q_query,episodes,seed,accuracy_mean,ci95,notes
+asl_alphabet,asl_alphabet,transformer,raw,5,5,15,600,42,0.9845,0.0021,split=test
+asl_alphabet,libras_alphabet,transformer,raw,5,5,15,600,42,0.8653,0.0081,split=test
+asl_alphabet,arabic_sign_alphabet,transformer,raw,5,5,15,600,42,0.7727,0.0075,split=test
+asl_alphabet,thai_fingerspelling,transformer,raw,5,5,15,600,42,0.5282,0.0081,split=test

@@ -1,194 +1,228 @@
 """
-Episodic sampling for N-way K-shot few-shot learning.
+Episodic data sampler for N-way K-shot few-shot learning.
 
-Generates deterministic episodes for Prototypical Network training and
-evaluation. Each episode samples N classes, draws K support and Q query
-examples per class, and partitions them for metric-learning classification.
-
-References:
-    Section 3.4 — Few-Shot Evaluation Protocol
-    Section 3.5 — Implementation Details (Episodic sampling)
+Deterministic per-episode seeding, strict K+Q feasibility, NaN guard.
 """
 
-import random
+import logging
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset, Sampler
 
+logger = logging.getLogger(__name__)
+
 
 class EpisodicSampler(Sampler):
-    """
-    Sampler that generates N-way K-shot episodes for few-shot learning.
+    """Sampler that yields indices for N-way K-shot episodes.
 
-    Each episode:
-        1. Samples N classes from eligible classes (those with ≥ K+Q test samples)
-        2. For each class, draws K support + Q query samples without replacement
-        3. Seeds each episode with (base_seed + episode_index) for reproducibility
+    Each episode selects *n_way* classes and for each class samples
+    *k_shot + q_query* examples.  Sampling is **deterministic**: episode
+    *e* uses ``np.random.RandomState(seed + e)``.
+
+    Feasibility rule
+    ~~~~~~~~~~~~~~~~
+    A class is *eligible* only when it has at least ``k_shot + q_query``
+    samples.  If fewer than ``n_way`` classes are eligible, the sampler
+    raises unless ``auto_adjust_q`` is enabled, in which case ``q_query``
+    is lowered to the largest value that makes at least ``n_way`` classes
+    eligible (minimum 1).
 
     Args:
-        dataset: A SplitLandmarkDataset instance with class_samples attribute.
-        n_way: Number of classes per episode (N).
-        k_shot: Number of support examples per class (K).
-        q_query: Number of query examples per class (Q).
-        num_episodes: Total number of episodes to generate.
-        seed: Base random seed for reproducibility.
+        labels: List of integer labels for every sample in the dataset.
+        n_way: Number of classes per episode.
+        k_shot: Support examples per class.
+        q_query: Query examples per class.
+        episodes: Number of episodes to generate.
+        seed: Base random seed for deterministic episode generation.
+        auto_adjust_q: If True, lower ``q_query`` when necessary.
+        dataset_name: Logical name used in log / error messages.
+        split_name: ``'train'`` or ``'test'`` – used in log / error messages.
     """
 
     def __init__(
         self,
-        dataset,
+        labels: List[int],
         n_way: int = 5,
         k_shot: int = 5,
         q_query: int = 15,
-        num_episodes: int = 600,
+        episodes: int = 1000,
         seed: int = 42,
-    ):
-        super().__init__(dataset)
-        self.dataset = dataset
+        auto_adjust_q: bool = False,
+        dataset_name: str = "unknown",
+        split_name: str = "unknown",
+    ) -> None:
+        super().__init__()
+        self.labels = np.array(labels)
         self.n_way = n_way
         self.k_shot = k_shot
         self.q_query = q_query
-        self.num_episodes = num_episodes
+        self.episodes = episodes
         self.seed = seed
+        self.auto_adjust_q = auto_adjust_q
+        self.dataset_name = dataset_name
+        self.split_name = split_name
 
-        # Get eligible classes (need at least K + Q samples)
-        min_samples = k_shot + q_query
-        self.eligible_classes = dataset.get_eligible_classes(min_samples)
+        # Build class → indices mapping
+        self.class_indices: Dict[int, List[int]] = {}
+        for idx, lbl in enumerate(self.labels):
+            self.class_indices.setdefault(int(lbl), []).append(idx)
 
-        if len(self.eligible_classes) < n_way:
+        # Per-class counts (for diagnostics)
+        class_counts = {c: len(idxs) for c, idxs in self.class_indices.items()}
+        min_count = min(class_counts.values()) if class_counts else 0
+
+        # ── Feasibility check ────────────────────────────────────────────
+        required = k_shot + q_query
+        eligible = [c for c, n in class_counts.items() if n >= required]
+
+        if len(eligible) < n_way and auto_adjust_q:
+            # Lower q_query to the largest value that makes >= n_way classes eligible
+            for q_try in range(q_query - 1, 0, -1):
+                req = k_shot + q_try
+                elig = [c for c, n in class_counts.items() if n >= req]
+                if len(elig) >= n_way:
+                    logger.warning(
+                        "[%s/%s] auto_adjust_q: q_query lowered %d → %d "
+                        "(min_per_class=%d, eligible=%d/%d)",
+                        dataset_name, split_name, q_query, q_try,
+                        min_count, len(elig), len(class_counts),
+                    )
+                    self.q_query = q_try
+                    eligible = elig
+                    break
+            else:
+                # Even q=1 is not enough
+                eligible = []  # fall through to the error below
+
+        if len(eligible) < n_way:
+            # Detailed diagnostic
+            too_small = {c: n for c, n in class_counts.items() if n < required}
             raise ValueError(
-                f"Not enough eligible classes for {n_way}-way episodes. "
-                f"Found {len(self.eligible_classes)} classes with ≥ {min_samples} samples, "
-                f"need at least {n_way}."
+                f"[{dataset_name}/{split_name}] K+Q feasibility FAILED.\n"
+                f"  Need n_c >= K+Q = {k_shot}+{self.q_query} = {k_shot + self.q_query} "
+                f"for at least N={n_way} classes.\n"
+                f"  Eligible classes: {len(eligible)}/{len(class_counts)}.\n"
+                f"  Min samples/class: {min_count}.\n"
+                f"  Classes with too few samples ({len(too_small)}): "
+                + ", ".join(f"cls {c}({n})" for c, n in sorted(too_small.items())[:10])
+                + ("\n  Hint: lower K, Q, or N; or use --auto_adjust_q." if not auto_adjust_q else "")
             )
 
+        self.valid_classes = sorted(eligible)
+
+        # ── Sanity log ───────────────────────────────────────────────────
+        logger.info(
+            "[%s/%s] EpisodicSampler ready: %d-way %d-shot %d-query, "
+            "%d episodes, seed=%d, eligible %d/%d classes, min_n_c=%d",
+            dataset_name, split_name, n_way, k_shot, self.q_query,
+            episodes, seed, len(self.valid_classes), len(class_counts), min_count,
+        )
+
     def __iter__(self):
-        for episode_idx in range(self.num_episodes):
-            # Deterministic seed per episode
-            rng = random.Random(self.seed + episode_idx)
+        for e in range(self.episodes):
+            rng = np.random.RandomState(self.seed + e)
+            episode_classes = rng.choice(
+                self.valid_classes, size=self.n_way, replace=False
+            ).tolist()
+            indices: List[int] = []
+            for cls in episode_classes:
+                cls_idxs = self.class_indices[cls]
+                chosen = rng.choice(
+                    cls_idxs, size=self.k_shot + self.q_query, replace=False
+                ).tolist()
+                indices.extend(chosen)
+            yield indices
 
-            # Step 1: Sample N classes
-            episode_classes = rng.sample(self.eligible_classes, self.n_way)
-
-            # Step 2: For each class, sample K + Q examples
-            batch_indices = []
-            for class_idx in episode_classes:
-                class_samples = self.dataset.get_class_samples(class_idx)
-                selected = rng.sample(class_samples, self.k_shot + self.q_query)
-                batch_indices.extend(selected)
-
-            yield batch_indices
-
-    def __len__(self):
-        return self.num_episodes
+    def __len__(self) -> int:
+        return self.episodes
 
 
 def split_support_query(
-    features: torch.Tensor,
-    labels: torch.Tensor,
+    batch: Tuple[torch.Tensor, torch.Tensor],
     n_way: int,
     k_shot: int,
     q_query: int,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Split a batch into support and query sets, re-labelling classes to {0,...,N-1}.
+    """Split a flat episode batch into support and query sets.
 
-    Given a batch from EpisodicSampler (N*(K+Q) samples ordered by class),
-    splits into K support and Q query samples per class.
+    The batch is assumed to be ordered: for each of the *n_way* classes,
+    the first *k_shot* samples are support, the next *q_query* are query.
+
+    Raises ``RuntimeError`` if any data tensor contains NaN.
 
     Args:
-        features: Tensor of shape (N*(K+Q), D) — feature vectors.
-        labels: Tensor of shape (N*(K+Q),) — original class labels.
-        n_way: Number of classes in the episode.
-        k_shot: Number of support examples per class.
-        q_query: Number of query examples per class.
+        batch: Tuple of (data_tensor, label_tensor).
+        n_way: Number of classes.
+        k_shot: Support shots.
+        q_query: Query shots.
 
     Returns:
-        support_features: Tensor of shape (N*K, D)
-        support_labels: Tensor of shape (N*K,) — re-labelled to {0,...,N-1}
-        query_features: Tensor of shape (N*Q, D)
-        query_labels: Tensor of shape (N*Q,) — re-labelled to {0,...,N-1}
+        (support_x, support_y, query_x, query_y)
     """
-    samples_per_class = k_shot + q_query
+    data, labels = batch
 
-    support_features_list = []
-    support_labels_list = []
-    query_features_list = []
-    query_labels_list = []
+    # ── NaN guard ────────────────────────────────────────────────────────
+    if torch.isnan(data).any():
+        nan_count = int(torch.isnan(data).sum())
+        raise RuntimeError(
+            f"NaN detected in episode data! {nan_count} NaN values in "
+            f"tensor of shape {tuple(data.shape)}. "
+            f"Check preprocessing or data files."
+        )
+
+    per_class = k_shot + q_query
+
+    support_x, support_y, query_x, query_y = [], [], [], []
 
     for i in range(n_way):
-        start = i * samples_per_class
-        end = start + samples_per_class
+        start = i * per_class
+        s_end = start + k_shot
+        q_end = s_end + q_query
 
-        class_features = features[start:end]
+        support_x.append(data[start:s_end])
+        support_y.append(labels[start:s_end])
+        query_x.append(data[s_end:q_end])
+        query_y.append(labels[s_end:q_end])
 
-        # Support: first K samples
-        support_features_list.append(class_features[:k_shot])
-        support_labels_list.append(
-            torch.full((k_shot,), i, dtype=torch.long)
-        )
+    support_x = torch.cat(support_x, dim=0)
+    support_y = torch.cat(support_y, dim=0)
+    query_x = torch.cat(query_x, dim=0)
+    query_y = torch.cat(query_y, dim=0)
 
-        # Query: remaining Q samples
-        query_features_list.append(class_features[k_shot:k_shot + q_query])
-        query_labels_list.append(
-            torch.full((q_query,), i, dtype=torch.long)
-        )
+    # ── Support/query disjointness assertion ─────────────────────────────
+    # By construction (positional split of replace=False sample), support
+    # and query indices are disjoint.  Assert tensor-level uniqueness as a
+    # defence-in-depth check.
+    n_support = support_x.shape[0]
+    n_query = query_x.shape[0]
+    assert n_support == n_way * k_shot, (
+        f"Expected {n_way * k_shot} support samples, got {n_support}"
+    )
+    assert n_query == n_way * q_query, (
+        f"Expected {n_way * q_query} query samples, got {n_query}"
+    )
 
-    support_features = torch.cat(support_features_list, dim=0)
-    support_labels = torch.cat(support_labels_list, dim=0)
-    query_features = torch.cat(query_features_list, dim=0)
-    query_labels = torch.cat(query_labels_list, dim=0)
+    # Re-label to 0..n_way-1
+    unique_labels = support_y.unique()
+    label_map = {int(old): new for new, old in enumerate(unique_labels.tolist())}
+    support_y = torch.tensor([label_map[int(l)] for l in support_y])
+    query_y = torch.tensor([label_map[int(l)] for l in query_y])
 
-    return support_features, support_labels, query_features, query_labels
+    return support_x, support_y, query_x, query_y
 
 
-def create_episode_batch(
-    dataset,
-    n_way: int,
-    k_shot: int,
-    q_query: int,
-    seed: int,
-    episode_idx: int,
-    device: torch.device = torch.device("cpu"),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Create a single episode batch directly from a dataset.
-
-    Convenience function that combines sampling and splitting.
+def collate_episode(batch):
+    """Custom collate that stacks episode samples into a single tensor.
 
     Args:
-        dataset: SplitLandmarkDataset instance.
-        n_way: Number of classes per episode.
-        k_shot: Support examples per class.
-        q_query: Query examples per class.
-        seed: Base seed.
-        episode_idx: Episode index (combined with seed for reproducibility).
-        device: Target device for tensors.
+        batch: List of lists of (tensor, label) from EpisodicSampler.
 
     Returns:
-        support_features, support_labels, query_features, query_labels
+        (data, labels) tensors.
     """
-    rng = random.Random(seed + episode_idx)
-    min_samples = k_shot + q_query
-    eligible = dataset.get_eligible_classes(min_samples)
-
-    episode_classes = rng.sample(eligible, n_way)
-
-    features_list = []
-    labels_list = []
-
-    for class_idx in episode_classes:
-        class_samples = dataset.get_class_samples(class_idx)
-        selected_indices = rng.sample(class_samples, k_shot + q_query)
-
-        for sample_idx in selected_indices:
-            feat, _ = dataset[sample_idx]
-            features_list.append(feat)
-            labels_list.append(class_idx)
-
-    features = torch.stack(features_list).to(device)
-    labels = torch.tensor(labels_list, dtype=torch.long).to(device)
-
-    return split_support_query(features, labels, n_way, k_shot, q_query)
+    # batch is a list of (tensor, label) tuples from a single episode
+    data = torch.stack([item[0] for item in batch], dim=0)
+    labels = torch.tensor([item[1] for item in batch], dtype=torch.long)
+    return data, labels

@@ -1,28 +1,21 @@
-"""
-Data pipeline for Geometry-Aware Metric Learning.
+"""Data package for sign metric learning."""
 
-Modules:
-    - representation: Raw, Angle, and RawAngle feature transforms
-    - dataset: SplitLandmarkDataset for loading keypoint .npy files
-    - episodes: EpisodicSampler for N-way K-shot episode generation
-    - extract_keypoints: MediaPipe hand keypoint extraction from RGB images
-"""
-
-from data.representation import (
-    RawRepresentation,
-    AngleRepresentation,
-    RawAngleRepresentation,
-    get_representation,
+from data.datasets import (
+    LandmarkDataset,
+    SplitLandmarkDataset,
+    SyntheticLandmarkDataset,
+    load_split_json,
+    validate_no_leak,
 )
-from data.dataset import SplitLandmarkDataset
-from data.episodes import EpisodicSampler, split_support_query
+from data.episodes import EpisodicSampler, split_support_query, collate_episode
 
 __all__ = [
-    "RawRepresentation",
-    "AngleRepresentation",
-    "RawAngleRepresentation",
-    "get_representation",
+    "LandmarkDataset",
     "SplitLandmarkDataset",
+    "SyntheticLandmarkDataset",
+    "load_split_json",
+    "validate_no_leak",
     "EpisodicSampler",
     "split_support_query",
+    "collate_episode",
 ]

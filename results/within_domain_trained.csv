@@ -1,0 +1,5 @@
+dataset,encoder,representation,n_way,k_shot,q_query_train,q_query_test,episodes_train,episodes_eval,epochs,best_epoch,accuracy_mean,ci95,eval_loss,train_samples,test_samples,classes,checkpoint
+asl_alphabet,mlp,angle,5,1,5,5,100,100,5,5,0.922800,0.017803,0.173975,1118,501,36,results\checkpoints\within_domain_asl_alphabet_mlp_angle_1shot.pt
+arabic_sign_alphabet,mlp,angle,5,1,5,5,100,100,5,5,0.888800,0.020835,0.311221,4952,2142,31,results\checkpoints\within_domain_arabic_sign_alphabet_mlp_angle_1shot.pt
+libras_alphabet,mlp,angle,5,1,5,5,100,100,5,5,0.947200,0.016028,0.150597,31973,13713,21,results\checkpoints\within_domain_libras_alphabet_mlp_angle_1shot.pt
+thai_fingerspelling,mlp,angle,5,1,5,5,100,100,5,5,0.652400,0.028556,0.978844,1998,863,42,results\checkpoints\within_domain_thai_fingerspelling_mlp_angle_1shot.pt

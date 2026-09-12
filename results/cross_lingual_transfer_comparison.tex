@@ -1,0 +1,308 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{caption}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{float}
+
+% Tighter spacing
+\setlength{\textfloatsep}{6pt}
+\setlength{\floatsep}{6pt}
+\setlength{\intextsep}{6pt}
+\captionsetup{skip=4pt}
+
+\title{Cross-Lingual Transfer Comparison:\\ASL vs LIBRAS vs Arabic vs Thai Sources}
+\author{Geometry-Aware Metric Learning}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+
+\noindent
+All results: MLP encoder, 5-way 5-shot, $Q{=}15$, 600 episodes, seed~42, test split.
+Pretraining: 3 epochs SupCon ($\tau{=}0.07$) + NLL on source train split.
+Target-sup.\ = last-layer fine-tuned on target train split (5 adapt epochs).
+\textbf{Bold} = best per target per mode.
+
+\vspace{-0.5em}
+\section*{Table 1: ASL $\rightarrow$ Targets}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from ASL (source) to each target language.}
+\label{tab:asl-transfer}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{LIBRAS}
+  & raw        & $86.5 \pm 0.8$ & $94.2 \pm 0.5$ \\
+  & angle      & $\mathbf{95.0 \pm 0.4}$ & $\mathbf{96.0 \pm 0.4}$ \\
+  & raw\_angle & $87.8 \pm 0.7$ & $95.2 \pm 0.5$ \\
+\midrule
+\multirow{3}{*}{Arabic}
+  & raw        & $74.2 \pm 0.8$ & $89.4 \pm 0.6$ \\
+  & angle      & $\mathbf{91.3 \pm 0.5}$ & $92.7 \pm 0.5$ \\
+  & raw\_angle & $76.6 \pm 0.9$ & $\mathbf{92.9 \pm 0.5}$ \\
+\midrule
+\multirow{3}{*}{Thai}
+  & raw        & $52.5 \pm 0.9$ & $\mathbf{58.5 \pm 0.9}$ \\
+  & angle      & $\mathbf{53.2 \pm 0.8}$ & $57.4 \pm 0.8$ \\
+  & raw\_angle & $50.6 \pm 0.8$ & $57.3 \pm 0.8$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 2: LIBRAS $\rightarrow$ Arabic}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from LIBRAS (source) to Arabic (target).}
+\label{tab:libras-arabic}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{Arabic}
+  & raw        & $89.8 \pm 0.6$ & $91.8 \pm 0.6$ \\
+  & angle      & $91.2 \pm 0.6$ & $92.2 \pm 0.5$ \\
+  & raw\_angle & $\mathbf{91.7 \pm 0.6}$ & $\mathbf{93.8 \pm 0.5}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 3: Arabic $\rightarrow$ LIBRAS}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from Arabic (source) to LIBRAS (target).}
+\label{tab:arabic-libras}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{LIBRAS}
+  & raw        & $95.9 \pm 0.5$ & $96.5 \pm 0.4$ \\
+  & angle      & $94.9 \pm 0.5$ & $95.9 \pm 0.4$ \\
+  & raw\_angle & $\mathbf{97.1 \pm 0.4}$ & $\mathbf{97.4 \pm 0.4}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 4: LIBRAS $\rightarrow$ ASL}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from LIBRAS (source) to ASL (target).}
+\label{tab:libras-asl}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{ASL}
+  & raw        & $\mathbf{93.7 \pm 0.5}$ & $\mathbf{95.0 \pm 0.5}$ \\
+  & angle      & $88.3 \pm 0.7$ & $89.9 \pm 0.6$ \\
+  & raw\_angle & $93.4 \pm 0.5$ & $94.4 \pm 0.5$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 5: Arabic $\rightarrow$ ASL}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from Arabic (source) to ASL (target).}
+\label{tab:arabic-asl}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{ASL}
+  & raw        & $\mathbf{94.1 \pm 0.4}$ & $\mathbf{95.5 \pm 0.4}$ \\
+  & angle      & $87.5 \pm 0.7$ & $89.7 \pm 0.6$ \\
+  & raw\_angle & $93.6 \pm 0.5$ & $95.0 \pm 0.4$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 6: LIBRAS $\rightarrow$ Thai}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from LIBRAS (source) to Thai (target).}
+\label{tab:libras-thai}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{Thai}
+  & raw        & $51.1 \pm 0.8$ & $55.9 \pm 0.8$ \\
+  & angle      & $49.5 \pm 0.8$ & $55.3 \pm 0.8$ \\
+  & raw\_angle & $\mathbf{52.2 \pm 0.8}$ & $\mathbf{57.4 \pm 0.8}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 7: Arabic $\rightarrow$ Thai}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from Arabic (source) to Thai (target).}
+\label{tab:arabic-thai}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{Thai}
+  & raw        & $\mathbf{54.6 \pm 0.9}$ & $58.8 \pm 0.9$ \\
+  & angle      & $50.0 \pm 0.8$ & $56.6 \pm 0.8$ \\
+  & raw\_angle & $52.8 \pm 0.8$ & $\mathbf{59.2 \pm 0.9}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 8: Thai $\rightarrow$ ASL}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from Thai (source) to ASL (target).}
+\label{tab:thai-asl}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{ASL}
+  & raw        & $94.5 \pm 0.4$ & $96.3 \pm 0.3$ \\
+  & angle      & $88.7 \pm 0.6$ & $89.9 \pm 0.6$ \\
+  & raw\_angle & $\mathbf{95.1 \pm 0.4}$ & $\mathbf{95.9 \pm 0.4}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 9: Thai $\rightarrow$ LIBRAS}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from Thai (source) to LIBRAS (target).}
+\label{tab:thai-libras}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{LIBRAS}
+  & raw        & $85.4 \pm 0.7$ & $94.9 \pm 0.5$ \\
+  & angle      & $\mathbf{94.6 \pm 0.5}$ & $95.3 \pm 0.5$ \\
+  & raw\_angle & $88.4 \pm 0.7$ & $\mathbf{96.2 \pm 0.4}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 10: Thai $\rightarrow$ Arabic}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cross-domain transfer from Thai (source) to Arabic (target).}
+\label{tab:thai-arabic}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Repr & Frozen & Target-sup.\ \\
+\midrule
+\multirow{3}{*}{Arabic}
+  & raw        & $73.8 \pm 0.8$ & $89.8 \pm 0.6$ \\
+  & angle      & $\mathbf{90.2 \pm 0.5}$ & $92.4 \pm 0.5$ \\
+  & raw\_angle & $79.4 \pm 0.8$ & $\mathbf{93.9 \pm 0.5}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Table 11: Best Frozen Accuracy — Source Comparison}
+\vspace{-0.5em}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Best frozen-encoder accuracy for each target, by source language.
+Each cell shows the best representation's accuracy.
+\textbf{Bold} indicates best source (frozen) for each target.}
+\label{tab:source-compare}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Target & ASL (source) & LIBRAS (source) & Arabic (source) & Thai (source) \\
+\midrule
+ASL    & ---            & $93.7 \pm 0.5$ & $94.1 \pm 0.4$ & $\mathbf{95.1 \pm 0.4}$ \\
+       &                & \footnotesize raw & \footnotesize raw & \footnotesize raw\_angle \\[3pt]
+LIBRAS & $95.0 \pm 0.4$ & ---            & $\mathbf{97.1 \pm 0.4}$ & $94.6 \pm 0.5$ \\
+       & \footnotesize angle & & \footnotesize raw\_angle & \footnotesize angle \\[3pt]
+Arabic & $91.3 \pm 0.5$ & $\mathbf{91.7 \pm 0.6}$ & --- & $90.2 \pm 0.5$ \\
+       & \footnotesize angle & \footnotesize raw\_angle & & \footnotesize angle \\[3pt]
+Thai   & $53.2 \pm 0.8$ & $52.2 \pm 0.8$ & $\mathbf{54.6 \pm 0.9}$ & --- \\
+       & \footnotesize angle & \footnotesize raw\_angle & \footnotesize raw & \\[2pt]
+\bottomrule
+\multicolumn{5}{@{}l}{\footnotesize --- indicates same-language source/target (not evaluated).}
+\end{tabular}
+\end{table}
+
+\vspace{-0.5em}
+\section*{Discussion}
+\vspace{-0.5em}
+
+\begin{sloppypar}
+All four source languages yield viable cross-lingual transfer.
+Thai$\rightarrow$ASL frozen ({\texttt{raw\_angle}}~95.1\%) is the best
+overall source for ASL, surpassing Arabic$\rightarrow$ASL (94.1\%) by
++1.0~pp despite Thai having the fewest training samples (2\,023).
+Arabic$\rightarrow$LIBRAS frozen ({\texttt{raw\_angle}}~97.1\%) remains
+the best for LIBRAS (+2.1~pp over ASL).
+LIBRAS$\rightarrow$Arabic (91.7\%) and Thai$\rightarrow$Arabic (90.2\%)
+are competitive with ASL$\rightarrow$Arabic (91.3\%).
+Arabic$\rightarrow$Thai (54.6\%) edges out ASL$\rightarrow$Thai (53.2\%)
+by +1.4~pp.
+\end{sloppypar}
+
+Transfer is \emph{asymmetric}: Arabic$\rightarrow$LIBRAS consistently
+outperforms LIBRAS$\rightarrow$Arabic by 4--6~pp, while
+Thai$\rightarrow$ASL (95.1\%) outperforms ASL$\rightarrow$Thai (53.2\%)
+by a massive 42~pp\textemdash the most extreme asymmetry in our matrix.
+Thai remains the hardest target across all sources (50--55\% frozen),
+reflecting its 42-class vocabulary and limited training data.
+
+The \texttt{raw} representation dominates when transferring \emph{to} ASL
+(from LIBRAS and Arabic), whereas \texttt{raw\_angle} is best for
+Thai$\rightarrow$ASL and most LIBRAS/Arabic targets.
+Notably, Thai is a surprisingly effective \emph{source} despite being
+the hardest \emph{target}, suggesting that its large class diversity
+(42 classes) provides rich pre-training signal even with limited samples.
+
+\end{document}

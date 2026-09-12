@@ -1,5 +1,6 @@
-"""Loss functions package."""
+"""Losses package."""
 
-from losses.supcon import SupConLoss
+from losses.triplet import TripletLoss
+from losses.supcon import SupConLoss, ArcFaceLoss, build_loss
 
-__all__ = ["SupConLoss"]
+__all__ = ["TripletLoss", "SupConLoss", "ArcFaceLoss", "build_loss"]

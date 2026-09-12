@@ -1,0 +1,9 @@
+dataset,encoder,representation,method,train_acc,test_acc
+asl_alphabet,mlp,raw,linear_classifier,0.9946,0.986
+asl_alphabet,mlp,angle,linear_classifier,0.9491,0.9384
+libras_alphabet,mlp,raw,linear_classifier,0.9997,0.9995
+libras_alphabet,mlp,angle,linear_classifier,0.9987,0.9974
+arabic_sign_alphabet,mlp,raw,linear_classifier,0.9893,0.9271
+arabic_sign_alphabet,mlp,angle,linear_classifier,0.957,0.9085
+thai_fingerspelling,mlp,raw,linear_classifier,0.7733,0.5492
+thai_fingerspelling,mlp,angle,linear_classifier,0.6937,0.5168

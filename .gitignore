@@ -1,0 +1,47 @@
+# ── Raw / processed data (large, downloaded or generated) ────────────────────
+data/raw/
+data/processed/
+data/downloads/
+data/filtered_onehand/
+
+# ── Model checkpoints & results artifacts ────────────────────────────────────
+results/checkpoints/
+results/plots/
+*.pt
+*.pth
+
+# ── MediaPipe model file ─────────────────────────────────────────────────────
+models/hand_landmarker.task
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── OS / Editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# ── Backup files ─────────────────────────────────────────────────────────────
+*.bak
+*.orig
+
+# ── Kaggle credentials (never commit) ───────────────────────────────────────
+kaggle.json

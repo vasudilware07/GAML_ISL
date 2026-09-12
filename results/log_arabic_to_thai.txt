@@ -1,0 +1,39 @@
+
+  Source dataset: arabic_sign_alphabet
+
+============================================================
+  Pretraining: mlp / raw on arabic_sign_alphabet
+============================================================
+  Pretrained in 5.4s
+
+  → arabic_sign_alphabet → thai_fingerspelling | mlp/raw | mode=frozen
+    Acc: 0.5459 ± 0.0090
+
+  → arabic_sign_alphabet → thai_fingerspelling | mlp/raw | mode=adapted
+    Acc: 0.5884 ± 0.0086
+
+============================================================
+  Pretraining: mlp / angle on arabic_sign_alphabet
+============================================================
+  Pretrained in 8.7s
+
+  → arabic_sign_alphabet → thai_fingerspelling | mlp/angle | mode=frozen
+    Acc: 0.5001 ± 0.0079
+
+  → arabic_sign_alphabet → thai_fingerspelling | mlp/angle | mode=adapted
+    Acc: 0.5656 ± 0.0078
+
+============================================================
+  Pretraining: mlp / raw_angle on arabic_sign_alphabet
+============================================================
+  Pretrained in 9.9s
+
+  → arabic_sign_alphabet → thai_fingerspelling | mlp/raw_angle | mode=frozen
+    Acc: 0.5283 ± 0.0084
+
+  → arabic_sign_alphabet → thai_fingerspelling | mlp/raw_angle | mode=adapted
+    Acc: 0.5924 ± 0.0085
+
+============================================================
+  Saved 6 rows to results/cross_domain_arabic_to_thai.csv
+============================================================

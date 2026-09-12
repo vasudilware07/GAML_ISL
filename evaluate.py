@@ -1,389 +1,389 @@
 """
-Evaluation script for few-shot sign language recognition.
+Evaluation script for sign language few-shot recognition.
 
-Runs 600-episode evaluation with 95% confidence intervals, produces
-t-SNE visualisations and confusion matrices.
+Supports zero-shot evaluation and standard episodic evaluation.
 
 Usage:
-    python evaluate.py --config configs/default.yaml \
-        --dataset asl --repr angle --encoder mlp \
-        --checkpoint checkpoints/asl_mlp_angle_best.pt
-
-References:
-    Section 3.4 — Few-Shot Evaluation Protocol
-    Section 3.5 — Implementation Details (Evaluation and reproducibility)
+    python evaluate.py --dataset BdSL --zero-shot
+    python evaluate.py --dataset ASL --config configs/base.yaml
 """
 
 import argparse
-import json
+import csv
 import os
-import random
 from pathlib import Path
+from typing import Dict, List
 
-import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 import torch
+import torch.nn.functional as F
 import yaml
-from sklearn.manifold import TSNE
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from data.dataset import SplitLandmarkDataset
-from data.episodes import create_episode_batch
-from data.representation import get_input_dim
-from models import create_model, count_parameters
+from data.datasets import LandmarkDataset, SplitLandmarkDataset, SyntheticLandmarkDataset
+from data.episodes import EpisodicSampler, split_support_query, collate_episode
+from models import build_encoder, build_few_shot_model
+from utils.logger import get_logger
+from utils.metrics import (
+    accuracy,
+    compute_confusion_matrix,
+    cross_domain_accuracy_drop,
+    few_shot_accuracy_with_ci,
+    plot_confusion_matrix,
+    plot_tsne,
+)
+from utils.seed import set_seed
+from train import get_dataset, get_device, load_config
 
 
-def set_seed(seed: int):
-    """Set all random seeds for full reproducibility."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-
-def evaluate_episodes(
+@torch.no_grad()
+def collect_embeddings(
     model,
-    dataset: SplitLandmarkDataset,
-    n_way: int,
-    k_shot: int,
-    q_query: int,
-    num_episodes: int,
-    seed: int,
+    dataset,
     device: torch.device,
-) -> dict:
-    """
-    Run N-way K-shot evaluation over multiple episodes.
-
-    Each episode is seeded by (seed + episode_index) for exact reproducibility.
+    batch_size: int = 64,
+) -> tuple:
+    """Extract embeddings for the full dataset.
 
     Args:
-        model: PrototypicalNetwork instance.
-        dataset: Test dataset.
-        n_way: Number of classes per episode (5).
-        k_shot: Support examples per class.
-        q_query: Query examples per class (15).
-        num_episodes: Number of episodes (600).
-        seed: Base seed (42).
-        device: Compute device.
+        model: Model with ``get_embeddings`` method.
+        dataset: Dataset yielding ``(tensor, label)``.
+        device: Torch device.
+        batch_size: Batch size for extraction.
 
     Returns:
-        Dictionary with:
-            - accuracy: Mean accuracy across episodes (%)
-            - ci_95: 95% confidence interval (1.96σ/√n)
-            - per_episode: List of per-episode accuracies
-            - all_predictions: All predictions for confusion analysis
-            - all_labels: All true labels
+        Tuple of ``(embeddings_np, labels_np)`` arrays.
     """
     model.eval()
-
-    episode_accuracies = []
-    all_predictions = []
-    all_labels = []
-
-    with torch.no_grad():
-        for ep_idx in tqdm(range(num_episodes), desc="Evaluating", leave=False):
-            support_features, support_labels, query_features, query_labels = (
-                create_episode_batch(
-                    dataset, n_way, k_shot, q_query,
-                    seed=seed, episode_idx=ep_idx, device=device,
-                )
-            )
-
-            log_probs, predictions, _ = model(
-                support_features, support_labels, query_features, n_way
-            )
-
-            acc = (predictions == query_labels).float().mean().item() * 100
-            episode_accuracies.append(acc)
-
-            all_predictions.extend(predictions.cpu().numpy().tolist())
-            all_labels.extend(query_labels.cpu().numpy().tolist())
-
-    accuracies = np.array(episode_accuracies)
-    mean_acc = accuracies.mean()
-    std_acc = accuracies.std()
-    ci_95 = 1.96 * std_acc / np.sqrt(len(accuracies))
-
-    return {
-        "accuracy": mean_acc,
-        "std": std_acc,
-        "ci_95": ci_95,
-        "per_episode": episode_accuracies,
-        "all_predictions": all_predictions,
-        "all_labels": all_labels,
-    }
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    all_emb, all_lbl = [], []
+    for data, labels in tqdm(loader, desc="Extracting embeddings", leave=False):
+        data = data.to(device)
+        emb = model.get_embeddings(data)
+        all_emb.append(emb.cpu().numpy())
+        all_lbl.append(labels.numpy() if isinstance(labels, torch.Tensor) else np.array(labels))
+    return np.concatenate(all_emb), np.concatenate(all_lbl)
 
 
-def compute_per_class_accuracy(
-    predictions: list,
-    labels: list,
-    n_way: int,
-) -> dict:
-    """Compute per-class accuracy from episode predictions."""
-    predictions = np.array(predictions)
-    labels = np.array(labels)
-
-    per_class = {}
-    for c in range(n_way):
-        mask = labels == c
-        if mask.sum() > 0:
-            per_class[c] = (predictions[mask] == c).mean() * 100
-
-    return per_class
-
-
-def plot_tsne(
+@torch.no_grad()
+def zero_shot_evaluate(
     model,
-    dataset: SplitLandmarkDataset,
-    n_way: int,
-    k_shot: int,
-    q_query: int,
-    seed: int,
+    source_dataset,
+    target_dataset,
     device: torch.device,
-    save_path: str,
-    perplexity: int = 30,
-    n_iter: int = 1000,
-):
-    """
-    Generate t-SNE visualisation of embeddings from a single episode.
+    n_way: int = 5,
+    k_shot: int = 5,
+    q_query: int = 15,
+    episodes: int = 1000,
+) -> Dict[str, float]:
+    """Zero-shot cross-domain evaluation.
 
-    Saves the plot to save_path.
+    Builds prototypes from the *source* support set and classifies *target*
+    queries. This evaluates how well the embedding space transfers across
+    languages without any adaptation.
+
+    Args:
+        model: Few-shot model.
+        source_dataset: Source language dataset (e.g., ASL).
+        target_dataset: Target language dataset (e.g., BdSL).
+        device: Device.
+        n_way: Ways.
+        k_shot: Shots from source.
+        q_query: Queries from target.
+        episodes: Number of evaluation episodes.
+
+    Returns:
+        Dict with accuracy metrics.
     """
     model.eval()
 
-    with torch.no_grad():
-        support_features, support_labels, query_features, query_labels = (
-            create_episode_batch(
-                dataset, n_way, k_shot, q_query,
-                seed=seed, episode_idx=0, device=device,
-            )
+    source_labels = [source_dataset[i][1] for i in range(len(source_dataset))]
+    target_labels = [target_dataset[i][1] for i in range(len(target_dataset))]
+
+    # Build class index maps
+    src_cls_idx = {}
+    for i, lbl in enumerate(source_labels):
+        src_cls_idx.setdefault(lbl, []).append(i)
+    tgt_cls_idx = {}
+    for i, lbl in enumerate(target_labels):
+        tgt_cls_idx.setdefault(lbl, []).append(i)
+
+    # Use overlapping class count
+    n_common = min(n_way, len(src_cls_idx), len(tgt_cls_idx))
+    src_classes = sorted(src_cls_idx.keys())[:n_common]
+    tgt_classes = sorted(tgt_cls_idx.keys())[:n_common]
+
+    accs = []
+    import random
+    for _ in tqdm(range(episodes), desc="Zero-shot eval"):
+        # Sample support from source, query from target
+        support_data, support_labels_ep = [], []
+        query_data, query_labels_ep = [], []
+
+        for new_lbl, (sc, tc) in enumerate(zip(src_classes, tgt_classes)):
+            s_idxs = random.sample(src_cls_idx[sc], min(k_shot, len(src_cls_idx[sc])))
+            q_idxs = random.sample(tgt_cls_idx[tc], min(q_query, len(tgt_cls_idx[tc])))
+            for si in s_idxs:
+                support_data.append(source_dataset[si][0])
+                support_labels_ep.append(new_lbl)
+            for qi in q_idxs:
+                query_data.append(target_dataset[qi][0])
+                query_labels_ep.append(new_lbl)
+
+        sx = torch.stack(support_data).to(device)
+        sy = torch.tensor(support_labels_ep, device=device)
+        qx = torch.stack(query_data).to(device)
+        qy = torch.tensor(query_labels_ep, device=device)
+
+        log_probs = model(sx, sy, qx, n_common)
+        acc = accuracy(log_probs, qy)
+        accs.append(acc)
+
+    mean_acc, ci = few_shot_accuracy_with_ci(accs)
+    return {"accuracy": mean_acc, "ci": ci, "episodes": episodes}
+
+
+def _load_checkpoint(model, checkpoint_path, cfg, device, logger):
+    """Load a checkpoint into *model*, with fallback to default path."""
+    ckpt_path = checkpoint_path
+    if ckpt_path is None:
+        ckpt_path = os.path.join(
+            cfg.get("checkpoint_dir", "results/checkpoints"),
+            f"best_{cfg['dataset']['name'].lower()}.pt",
         )
-
-        # Get embeddings
-        all_features = torch.cat([support_features, query_features], dim=0)
-        all_labels = torch.cat([support_labels, query_labels], dim=0)
-        embeddings = model.encode(all_features).cpu().numpy()
-        labels = all_labels.cpu().numpy()
-
-    # Compute t-SNE
-    tsne = TSNE(
-        n_components=2,
-        perplexity=min(perplexity, len(embeddings) - 1),
-        n_iter=n_iter,
-        random_state=seed,
-    )
-    embeddings_2d = tsne.fit_transform(embeddings)
-
-    # Plot
-    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-    palette = sns.color_palette("husl", n_way)
-
-    n_support = n_way * k_shot
-
-    for c in range(n_way):
-        # Support points (larger markers)
-        mask_s = (labels[:n_support] == c)
-        ax.scatter(
-            embeddings_2d[:n_support][mask_s, 0],
-            embeddings_2d[:n_support][mask_s, 1],
-            color=palette[c], marker="^", s=120, edgecolors="black",
-            label=f"Class {c} (support)", zorder=3,
-        )
-
-        # Query points (smaller markers)
-        mask_q = (labels[n_support:] == c)
-        ax.scatter(
-            embeddings_2d[n_support:][mask_q, 0],
-            embeddings_2d[n_support:][mask_q, 1],
-            color=palette[c], marker="o", s=40, alpha=0.6,
-            label=f"Class {c} (query)",
-        )
-
-    ax.set_title("t-SNE Embedding Visualisation", fontsize=14)
-    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.close()
-    print(f"t-SNE plot saved: {save_path}")
-
-
-def plot_confusion_matrix(
-    predictions: list,
-    labels: list,
-    n_way: int,
-    save_path: str,
-):
-    """Generate and save a confusion matrix heatmap."""
-    predictions = np.array(predictions)
-    labels = np.array(labels)
-
-    # Compute confusion matrix
-    cm = np.zeros((n_way, n_way), dtype=int)
-    for true, pred in zip(labels, predictions):
-        cm[true][pred] += 1
-
-    # Normalize rows
-    cm_norm = cm.astype(float) / (cm.sum(axis=1, keepdims=True) + 1e-8)
-
-    fig, ax = plt.subplots(1, 1, figsize=(8, 7))
-    sns.heatmap(
-        cm_norm, annot=True, fmt=".2f", cmap="Blues",
-        xticklabels=range(n_way), yticklabels=range(n_way), ax=ax,
-    )
-    ax.set_xlabel("Predicted", fontsize=12)
-    ax.set_ylabel("True", fontsize=12)
-    ax.set_title("Confusion Matrix (Normalised)", fontsize=14)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
-    plt.close()
-    print(f"Confusion matrix saved: {save_path}")
+    if os.path.exists(ckpt_path):
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        logger.info("Loaded checkpoint: %s", ckpt_path)
+    else:
+        logger.warning("No checkpoint found at %s, using untrained model", ckpt_path)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Evaluate few-shot SLR model."
-    )
-    parser.add_argument(
-        "--config", type=str, default="configs/default.yaml",
-        help="Path to YAML configuration file.",
-    )
-    parser.add_argument("--dataset", type=str, help="Dataset name.")
-    parser.add_argument("--repr", type=str, help="Representation name.")
-    parser.add_argument("--encoder", type=str, help="Encoder name.")
-    parser.add_argument("--checkpoint", type=str, help="Checkpoint path.")
-    parser.add_argument("--k_shot", type=int, help="K-shot override.")
-    parser.add_argument("--num_episodes", type=int, help="Number of episodes.")
-    parser.add_argument("--seed", type=int, help="Seed override.")
-    parser.add_argument("--data_dir", type=str, help="Data directory override.")
-    parser.add_argument("--no_tsne", action="store_true", help="Skip t-SNE plot.")
-    parser.add_argument("--no_confusion", action="store_true",
-                        help="Skip confusion matrix.")
-
+    parser = argparse.ArgumentParser(description="Evaluate sign language model")
+    parser.add_argument("--config", type=str, default="configs/base.yaml")
+    parser.add_argument("--dataset", type=str, default="ASL")
+    parser.add_argument("--checkpoint", type=str, default=None)
+    parser.add_argument("--zero-shot", action="store_true")
+    parser.add_argument("--episodes", type=int, default=1000)
+    parser.add_argument("--device", type=str, default=None)
+    # ── New flags ─────────────────────────────────────────────────────
+    parser.add_argument("--json_splits", action="store_true",
+                        help="Use JSON-based splits from splits/ directory")
+    parser.add_argument("--auto_adjust_q", action="store_true",
+                        help="Auto-lower q_query when classes have too few samples")
+    # Cross-domain evaluation
+    parser.add_argument("--cross_domain_eval", action="store_true",
+                        help="Cross-domain evaluation: load source ckpt, eval on target test split")
+    parser.add_argument("--source_dataset", type=str, default=None,
+                        help="Source dataset name (for cross-domain)")
+    parser.add_argument("--target_dataset", type=str, default=None,
+                        help="Target dataset name (for cross-domain)")
+    parser.add_argument("--source_ckpt", type=str, default=None,
+                        help="Path to source pretrained checkpoint")
+    parser.add_argument("--split", type=str, default="test",
+                        choices=["train", "test"],
+                        help="Which split to evaluate on (default: test)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Override seed for evaluation")
     args = parser.parse_args()
 
-    # Load config
-    with open(args.config, "r") as f:
-        config = yaml.safe_load(f)
+    cfg = load_config(args.config)
+    if args.device:
+        cfg["device"] = args.device
+    seed = args.seed if args.seed is not None else cfg.get("seed", 42)
+    set_seed(seed)
+    device = get_device(cfg)
 
-    # Apply overrides
-    if args.dataset:
-        config["dataset"] = args.dataset
-        ds_config_path = f"configs/{args.dataset}.yaml"
-        if os.path.exists(ds_config_path):
-            with open(ds_config_path, "r") as f:
-                config.update(yaml.safe_load(f))
-    if args.repr:
-        config["representation"] = args.repr
-    if args.encoder:
-        config["encoder"] = args.encoder
-    if args.k_shot is not None:
-        config["k_shot"] = args.k_shot
-    if args.num_episodes is not None:
-        config["num_eval_episodes"] = args.num_episodes
-    if args.seed is not None:
-        config["seed"] = args.seed
-    if args.data_dir:
-        config["data_dir"] = args.data_dir
+    os.makedirs(cfg.get("output_dir", "results"), exist_ok=True)
+    os.makedirs("results/plots", exist_ok=True)
+    logger = get_logger("evaluate", cfg.get("log_file", "results/eval.log"))
 
-    # Setup
-    set_seed(config["seed"])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    fs_cfg = cfg["few_shot"]
+    n_way = fs_cfg["n_way"]
+    k_shot = fs_cfg["k_shot"]
+    q_query = fs_cfg["q_query"]
 
-    # Load dataset
-    dataset_name = config["dataset"]
-    representation = config["representation"]
-    splits_dir = config["splits_dir"]
-    data_dir = config["data_dir"]
+    use_json = args.json_splits
+    auto_q = args.auto_adjust_q
 
-    test_split = os.path.join(splits_dir, f"{dataset_name}_test.json")
-    test_dataset = SplitLandmarkDataset(
-        data_dir=data_dir,
-        split_file=test_split,
-        representation=representation,
-    )
+    if args.cross_domain_eval:
+        # ── Cross-domain evaluation mode ─────────────────────────────
+        if not args.source_dataset or not args.target_dataset:
+            parser.error("--cross_domain_eval requires --source_dataset and --target_dataset")
+        if not args.source_ckpt:
+            parser.error("--cross_domain_eval requires --source_ckpt")
 
-    print(f"Test dataset: {test_dataset}")
-
-    # Create model
-    input_dim = get_input_dim(representation)
-    model = create_model(
-        encoder_name=config["encoder"],
-        input_dim=input_dim,
-        embedding_dim=config["embedding_dim"],
-        hidden_dim=config["hidden_dim"],
-        dropout=config.get("dropout", 0.3),
-        representation=representation,
-    )
-    model = model.to(device)
-
-    # Load checkpoint if provided
-    if args.checkpoint and os.path.exists(args.checkpoint):
-        checkpoint = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print(f"Loaded checkpoint: {args.checkpoint}")
-        print(f"  Checkpoint val accuracy: {checkpoint.get('val_accuracy', 'N/A')}")
-
-    print(f"Model parameters: {count_parameters(model):,}")
-
-    # Evaluate
-    n_way = config["n_way"]
-    k_shot = config["k_shot"]
-    q_query = config["q_query"]
-    num_episodes = config["num_eval_episodes"]
-    seed = config["seed"]
-
-    print(f"\nEvaluating: {n_way}-way {k_shot}-shot, Q={q_query}, "
-          f"{num_episodes} episodes, seed={seed}")
-
-    results = evaluate_episodes(
-        model, test_dataset, n_way, k_shot, q_query,
-        num_episodes, seed, device,
-    )
-
-    print(f"\nResults:")
-    print(f"  Accuracy: {results['accuracy']:.1f} ± {results['ci_95']:.1f}%")
-    print(f"  Std:      {results['std']:.2f}")
-
-    # Save results
-    results_dir = Path(config.get("results_dir", "results"))
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    result_name = f"{dataset_name}_{config['encoder']}_{representation}_{k_shot}shot"
-    result_file = results_dir / f"{result_name}.json"
-
-    with open(result_file, "w") as f:
-        json.dump({
-            "dataset": dataset_name,
-            "encoder": config["encoder"],
-            "representation": representation,
-            "n_way": n_way,
-            "k_shot": k_shot,
-            "q_query": q_query,
-            "num_episodes": num_episodes,
-            "seed": seed,
-            "accuracy": results["accuracy"],
-            "ci_95": results["ci_95"],
-            "std": results["std"],
-        }, f, indent=2)
-
-    print(f"Results saved: {result_file}")
-
-    # t-SNE visualisation
-    if not args.no_tsne:
-        tsne_path = results_dir / f"{result_name}_tsne.png"
-        plot_tsne(
-            model, test_dataset, n_way, k_shot, q_query,
-            seed, device, str(tsne_path),
+        logger.info(
+            "Cross-domain eval: source=%s → target=%s (ckpt=%s)",
+            args.source_dataset, args.target_dataset, args.source_ckpt,
         )
 
-    # Confusion matrix
-    if not args.no_confusion:
-        cm_path = results_dir / f"{result_name}_confusion.png"
-        plot_confusion_matrix(
-            results["all_predictions"], results["all_labels"],
-            n_way, str(cm_path),
+        # Build model
+        representation = cfg.get("representation", "raw")
+        encoder = build_encoder(cfg, representation)
+        model = build_few_shot_model(cfg, encoder).to(device)
+
+        # Load source checkpoint
+        if not os.path.exists(args.source_ckpt):
+            raise FileNotFoundError(f"Source checkpoint not found: {args.source_ckpt}")
+        ckpt = torch.load(args.source_ckpt, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        logger.info("Loaded source checkpoint: %s", args.source_ckpt)
+
+        # Build target dataset (TEST split only)
+        target_name = args.target_dataset.lower()
+        data_root_env = os.environ.get("DATA_ROOT", "")
+        flat_root = (
+            Path(data_root_env) / f"data/processed/{target_name}"
+            if data_root_env
+            else Path(f"data/processed/{target_name}")
         )
+
+        if use_json and flat_root.exists():
+            target_ds = SplitLandmarkDataset(
+                dataset_name=target_name,
+                split=args.split,
+                data_root=str(flat_root),
+                representation=representation,
+            )
+        else:
+            # Fallback to directory-based split
+            target_cfg = {
+                **cfg,
+                "dataset": {
+                    **cfg["dataset"],
+                    "name": target_name,
+                    "root": str(flat_root) + "_split",
+                },
+            }
+            target_ds = get_dataset(target_cfg, split=args.split)
+
+        target_labels = [target_ds[i][1] for i in range(len(target_ds))]
+        eval_sampler = EpisodicSampler(
+            target_labels, n_way=n_way, k_shot=k_shot, q_query=q_query,
+            episodes=args.episodes, seed=seed,
+            auto_adjust_q=auto_q,
+            dataset_name=target_name, split_name=args.split,
+        )
+        eval_loader = DataLoader(
+            target_ds, batch_sampler=eval_sampler, collate_fn=collate_episode,
+        )
+
+        from train import evaluate_episodes
+        results = evaluate_episodes(model, eval_loader, device, n_way, k_shot, eval_sampler.q_query)
+        mean_acc = results["accuracy"]
+        ci = results["ci"]
+        logger.info("Cross-domain accuracy: %.4f ± %.4f", mean_acc, ci)
+
+        # NaN guard on final result
+        if np.isnan(mean_acc):
+            raise RuntimeError(
+                f"NaN accuracy in cross-domain eval "
+                f"(source={args.source_dataset}, target={args.target_dataset})"
+            )
+
+        # Write standard CSV row
+        csv_path = os.path.join(cfg.get("output_dir", "results"), "cross_domain.csv")
+        write_header = not os.path.exists(csv_path)
+        with open(csv_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow([
+                    "source_dataset", "target_dataset", "encoder", "representation",
+                    "k_shot", "n_way", "q_query", "episodes", "seed",
+                    "accuracy_mean", "ci95", "notes",
+                ])
+            writer.writerow([
+                args.source_dataset, args.target_dataset,
+                cfg["model"]["encoder"], representation,
+                k_shot, n_way, eval_sampler.q_query, args.episodes, seed,
+                f"{mean_acc:.4f}", f"{ci:.4f}",
+                f"split={args.split}",
+            ])
+        logger.info("Results appended to %s", csv_path)
+
+    elif args.zero_shot:
+        # ── Zero-shot cross-domain ──
+        representation = cfg.get("representation", "raw")
+        encoder = build_encoder(cfg, representation)
+        model = build_few_shot_model(cfg, encoder).to(device)
+        _load_checkpoint(model, args.checkpoint, cfg, device, logger)
+
+        logger.info("Running zero-shot cross-domain evaluation")
+        source_ds = get_dataset(cfg, split="test", use_json_splits=use_json)
+
+        # Build target dataset
+        target_cfg = cfg.copy()
+        target_cfg["dataset"] = {
+            **cfg["dataset"],
+            "name": args.dataset,
+            "root": f"data/processed/{args.dataset.lower()}",
+        }
+        target_ds = get_dataset(target_cfg, split="test", use_json_splits=use_json)
+
+        results = zero_shot_evaluate(
+            model, source_ds, target_ds, device,
+            n_way, k_shot, q_query, args.episodes,
+        )
+        logger.info(f"Zero-shot accuracy: {results['accuracy']:.4f} ± {results['ci']:.4f}")
+
+        # Save results
+        csv_path = os.path.join(cfg.get("output_dir", "results"), "zero_shot.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["metric", "value"])
+            writer.writeheader()
+            for k, v in results.items():
+                writer.writerow({"metric": k, "value": v})
+        logger.info(f"Results saved to {csv_path}")
+
+    else:
+        # ── Standard episodic evaluation ──
+        representation = cfg.get("representation", "raw")
+        encoder = build_encoder(cfg, representation)
+        model = build_few_shot_model(cfg, encoder).to(device)
+        _load_checkpoint(model, args.checkpoint, cfg, device, logger)
+
+        logger.info(f"Running episodic evaluation on {args.dataset}")
+        eval_ds = get_dataset(cfg, split=args.split, use_json_splits=use_json)
+        ds_name = cfg["dataset"].get("name", "unknown").lower()
+        eval_labels = [eval_ds[i][1] for i in range(len(eval_ds))]
+
+        eval_sampler = EpisodicSampler(
+            eval_labels, n_way=n_way, k_shot=k_shot, q_query=q_query,
+            episodes=args.episodes, seed=seed,
+            auto_adjust_q=auto_q,
+            dataset_name=ds_name, split_name=args.split,
+        )
+        eval_loader = DataLoader(
+            eval_ds, batch_sampler=eval_sampler, collate_fn=collate_episode,
+        )
+
+        from train import evaluate_episodes
+        results = evaluate_episodes(model, eval_loader, device, n_way, k_shot, eval_sampler.q_query)
+        logger.info(f"Accuracy: {results['accuracy']:.4f} ± {results['ci']:.4f}")
+
+        # NaN guard
+        if np.isnan(results["accuracy"]):
+            raise RuntimeError(
+                f"NaN accuracy on {ds_name}/{args.split}. "
+                f"Check data integrity or use --auto_adjust_q."
+            )
+
+        # Embeddings & plots
+        embeddings, labels = collect_embeddings(model, eval_ds, device)
+        plot_tsne(embeddings, labels, save_path="results/plots/tsne.png")
+        logger.info("t-SNE plot saved to results/plots/tsne.png")
+
+        # Save results
+        csv_path = os.path.join(cfg.get("output_dir", "results"), "few_shot.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["metric", "value"])
+            writer.writeheader()
+            for k, v in results.items():
+                writer.writerow({"metric": k, "value": v})
+        logger.info(f"Results saved to {csv_path}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,39 @@
+
+  Source dataset: libras_alphabet
+
+============================================================
+  Pretraining: mlp / raw on libras_alphabet
+============================================================
+  Pretrained in 8.9s
+
+  → libras_alphabet → thai_fingerspelling | mlp/raw | mode=frozen
+    Acc: 0.5106 ± 0.0080
+
+  → libras_alphabet → thai_fingerspelling | mlp/raw | mode=adapted
+    Acc: 0.5586 ± 0.0080
+
+============================================================
+  Pretraining: mlp / angle on libras_alphabet
+============================================================
+  Pretrained in 13.1s
+
+  → libras_alphabet → thai_fingerspelling | mlp/angle | mode=frozen
+    Acc: 0.4953 ± 0.0080
+
+  → libras_alphabet → thai_fingerspelling | mlp/angle | mode=adapted
+    Acc: 0.5530 ± 0.0078
+
+============================================================
+  Pretraining: mlp / raw_angle on libras_alphabet
+============================================================
+  Pretrained in 14.5s
+
+  → libras_alphabet → thai_fingerspelling | mlp/raw_angle | mode=frozen
+    Acc: 0.5218 ± 0.0080
+
+  → libras_alphabet → thai_fingerspelling | mlp/raw_angle | mode=adapted
+    Acc: 0.5735 ± 0.0083
+
+============================================================
+  Saved 6 rows to results/cross_domain_libras_to_thai.csv
+============================================================

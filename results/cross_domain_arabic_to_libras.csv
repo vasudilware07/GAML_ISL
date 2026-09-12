@@ -1,0 +1,7 @@
+source,target,encoder,representation,mode,k_shot,n_way,q_query,episodes,seed,accuracy_mean,ci95
+arabic_sign_alphabet,libras_alphabet,mlp,raw,frozen,5,5,15,600,42,0.9589,0.0046
+arabic_sign_alphabet,libras_alphabet,mlp,raw,adapted,5,5,15,600,42,0.9654,0.0044
+arabic_sign_alphabet,libras_alphabet,mlp,angle,frozen,5,5,15,600,42,0.9487,0.0049
+arabic_sign_alphabet,libras_alphabet,mlp,angle,adapted,5,5,15,600,42,0.9587,0.0043
+arabic_sign_alphabet,libras_alphabet,mlp,raw_angle,frozen,5,5,15,600,42,0.9713,0.0037
+arabic_sign_alphabet,libras_alphabet,mlp,raw_angle,adapted,5,5,15,600,42,0.9738,0.0037

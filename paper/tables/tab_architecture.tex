@@ -1,0 +1,18 @@
+\begin{table}[t]
+  \caption{Encoder parameter counts by representation. All encoders output 128-D embeddings.}
+  \label{tab:architecture}
+  \centering\small
+  \begin{tabular}{@{}llrr@{}}
+    \toprule
+    Encoder & Repr & Input Dim & Parameters \\
+    \midrule
+    Mlp & \texttt{raw} & 63 & 116,096 \\
+    Mlp & \texttt{angle} & 20 & 105,088 \\
+    Mlp & \texttt{raw_angle} & 83 & 121,216 \\
+    Transformer & \texttt{raw} & 63 & 282,240 \\
+    Transformer & \texttt{angle} & 20 & 284,416 \\
+    Transformer & \texttt{raw_angle} & 83 & 292,480 \\
+    GCN & \texttt{raw} & 21×3 & 378,110 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

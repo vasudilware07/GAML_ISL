@@ -1,0 +1,4 @@
+axis,setting,accuracy,ci,loss
+representation,raw,0.9519,0.0090,0.1357
+representation,pairwise,0.9416,0.0131,0.1674
+representation,graph,0.9557,0.0099,0.1324

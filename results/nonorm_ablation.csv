@@ -1,0 +1,9 @@
+dataset,encoder,representation,k_shot,n_way,q_query,episodes,seed,accuracy_mean,ci95,notes
+arabic_sign_alphabet_nonorm,mlp,raw,1,5,15,600,42,0.4177,0.0000,nonorm; json-splits
+arabic_sign_alphabet_nonorm,mlp,raw,3,5,15,600,42,0.5631,0.0000,nonorm; json-splits
+arabic_sign_alphabet_nonorm,mlp,raw,5,5,15,600,42,0.5908,0.0089,nonorm; json-splits
+libras_alphabet_nonorm,mlp,raw,1,5,15,600,42,0.5623,0.0097,nonorm; json-splits
+libras_alphabet_nonorm,mlp,raw,3,5,15,600,42,0.7309,0.0085,nonorm; json-splits
+libras_alphabet_nonorm,mlp,raw,5,5,15,600,42,0.7639,0.0081,nonorm; json-splits
+libras_alphabet_nonorm,mlp,angle,5,5,15,600,42,0.9442,0.0045,nonorm; json-splits
+arabic_sign_alphabet_nonorm,mlp,angle,5,5,15,600,42,0.9010,0.0055,nonorm; json-splits

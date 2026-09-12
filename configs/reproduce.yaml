@@ -1,0 +1,119 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  Reproduction manifest for the published evaluation matrix
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# This file documents the exact commands and parameters used to produce
+# results/matrix_final.csv.  Running the commands below with the same
+# data, seed, and code version will reproduce byte-identical results.
+#
+# Generated from the final evaluation run (June 2025).
+
+seed: 42
+python_version: "3.13.11"
+torch_version: "2.10.0+cpu"
+hardware: "CPU (no GPU)"
+
+# ── Step 0: Install dependencies ──────────────────────────────────────────
+# pip install -r requirements.txt
+
+# ── Step 1: Download datasets ─────────────────────────────────────────────
+# Each dataset is downloaded from Kaggle using the API.
+# Export KAGGLE_API_TOKEN or place kaggle.json in ~/.kaggle/
+#
+# python tools/auto_find_download_and_filter_onehand.py --dataset asl-alphabet       --download --extract --seed 42
+# python tools/auto_find_download_and_filter_onehand.py --dataset thai-fingerspelling --download --extract --seed 42
+# python tools/auto_find_download_and_filter_onehand.py --dataset libras-alphabet     --download --extract --seed 42
+# python tools/auto_find_download_and_filter_onehand.py --dataset arabic-sign-alphabet --download --extract --seed 42
+
+kaggle_slugs:
+  asl-alphabet:       "grassknoted/asl-alphabet"
+  thai-fingerspelling: "nickihartmann/thai-letter-sign-language"
+  libras-alphabet:    "williansoliveira/libras"
+  arabic-sign-alphabet: "muhammadalbrham/rgb-arabic-alphabets-sign-language-dataset"
+
+# ── Step 2: Preprocess (extract MediaPipe landmarks) ──────────────────────
+# python data/preprocess.py --image_dir data/raw/asl_alphabet       --output_dir data/processed/asl_alphabet
+# python data/preprocess.py --image_dir data/raw/libras_alphabet    --output_dir data/processed/libras_alphabet
+# python data/preprocess.py --image_dir data/raw/arabic_sign_alphabet --output_dir data/processed/arabic_sign_alphabet
+# python data/preprocess.py --image_dir data/raw/thai_fingerspelling --output_dir data/processed/thai_fingerspelling
+
+# ── Step 3: Create train/test splits (70/30 stratified) ──────────────────
+# python tools/make_splits.py --dataset asl_alphabet         --seed 42 --ratio 0.7
+# python tools/make_splits.py --dataset libras_alphabet      --seed 42 --ratio 0.7
+# python tools/make_splits.py --dataset arabic_sign_alphabet --seed 42 --ratio 0.7
+# python tools/make_splits.py --dataset thai_fingerspelling  --seed 42 --ratio 0.7
+
+split_params:
+  ratio: 0.7
+  seed: 42
+  note: "Stratified per-class split. floor(ratio * n_c) train, rest test."
+  datasets:
+    - name: asl_alphabet
+      classes: 29
+      train_samples: 44498
+      test_samples: 19093
+    - name: libras_alphabet
+      classes: 21
+      train_samples: 23993
+      test_samples: 10291
+    - name: arabic_sign_alphabet
+      classes: 31
+      train_samples: 4952
+      test_samples: 2141
+    - name: thai_fingerspelling
+      classes: 42
+      train_samples: 1998
+      test_samples: 863
+
+# ── Step 4: Run evaluation matrix ────────────────────────────────────────
+# All four datasets evaluated on TEST split with --auto_adjust_q:
+#
+# python tools/run_full_matrix.py \
+#     --datasets asl_alphabet libras_alphabet arabic_sign_alphabet thai_fingerspelling \
+#     --encoders mlp transformer \
+#     --representations raw angle raw_angle \
+#     --shots 1 3 5 \
+#     --episodes 600 \
+#     --seed 42 \
+#     --eval_split test \
+#     --json_splits --auto_adjust_q \
+#     --output results/matrix_final.csv
+
+evaluation:
+  eval_split: test
+  json_splits: true
+  auto_adjust_q: true
+  episodes: 600
+  n_way: 5
+  q_query: 15
+
+# ── Matrix dimensions ────────────────────────────────────────────────────
+matrix:
+  encoders: [mlp, transformer]
+  representations: [raw, angle, raw_angle]
+  shots: [1, 3, 5]
+  n_way: 5
+  q_query: 15
+  datasets: [asl_alphabet, libras_alphabet, arabic_sign_alphabet, thai_fingerspelling]
+  total_evaluations: 72    # 2 enc × 3 repr × 4 ds × 3 shots
+  # Note: GCN was excluded — only compatible with raw representation
+
+# ── Cross-domain (Step 5) ────────────────────────────────────────────────
+# python train.py --config configs/base.yaml --dataset asl_alphabet \
+#     --json_splits --save results/checkpoints/best_asl_alphabet.pt --epochs 10
+#
+# for target in asl_alphabet libras_alphabet arabic_sign_alphabet thai_fingerspelling; do
+#     python evaluate.py --config configs/base.yaml \
+#         --cross_domain_eval \
+#         --source_dataset asl_alphabet --target_dataset "$target" \
+#         --source_ckpt results/checkpoints/best_asl_alphabet.pt \
+#         --episodes 600 --seed 42 --json_splits --split test --auto_adjust_q
+# done
+
+# ── Output ────────────────────────────────────────────────────────────────
+output_files:
+  within_domain: "results/matrix_final.csv"
+  cross_domain: "results/cross_domain.csv"
+  baselines: "results/baseline_linear.csv"
+  robustness: "results/robustness_seeds.csv"
+  normalisation_ablation: "results/nonorm_ablation.csv"

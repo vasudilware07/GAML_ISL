@@ -1,0 +1,9 @@
+dataset,encoder,representation,method,k_shot,accuracy,ci
+asl_alphabet,mlp,raw,episode_linear,5,0.9188,0.0055
+asl_alphabet,mlp,angle,episode_linear,5,0.8569,0.0072
+libras_alphabet,mlp,raw,episode_linear,5,0.8021,0.0082
+libras_alphabet,mlp,angle,episode_linear,5,0.9312,0.0053
+arabic_sign_alphabet,mlp,raw,episode_linear,5,0.6368,0.0085
+arabic_sign_alphabet,mlp,angle,episode_linear,5,0.8822,0.006
+thai_fingerspelling,mlp,raw,episode_linear,5,0.5088,0.008
+thai_fingerspelling,mlp,angle,episode_linear,5,0.5191,0.0078

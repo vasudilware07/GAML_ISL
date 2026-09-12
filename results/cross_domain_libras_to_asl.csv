@@ -1,0 +1,7 @@
+source,target,encoder,representation,mode,k_shot,n_way,q_query,episodes,seed,accuracy_mean,ci95
+libras_alphabet,asl_alphabet,mlp,raw,frozen,5,5,15,600,42,0.937,0.0047
+libras_alphabet,asl_alphabet,mlp,raw,adapted,5,5,15,600,42,0.9503,0.0045
+libras_alphabet,asl_alphabet,mlp,angle,frozen,5,5,15,600,42,0.8833,0.0065
+libras_alphabet,asl_alphabet,mlp,angle,adapted,5,5,15,600,42,0.8993,0.0061
+libras_alphabet,asl_alphabet,mlp,raw_angle,frozen,5,5,15,600,42,0.9335,0.005
+libras_alphabet,asl_alphabet,mlp,raw_angle,adapted,5,5,15,600,42,0.9443,0.0048

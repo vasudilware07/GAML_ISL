@@ -1,0 +1,52 @@
+# =============================================================================
+# Cross-Lingual Transfer: ASL → Thai / LIBRAS / Arabic
+# Overrides base.yaml for target language experiments
+# =============================================================================
+
+# NOTE: _base_ is not auto-loaded; load base.yaml first, then overlay this.
+# Usage: python train.py --config configs/base.yaml  (then override fields)
+
+seed: 42
+
+# ── Source ────────────────────────────────────────────────────────────────────
+source_dataset:
+  name: "ASL"
+  root: "data/processed/asl_alphabet"
+  num_classes: 29
+
+# ── Target ────────────────────────────────────────────────────────────────────
+dataset:
+  name: "Thai"
+  root: "data/processed/thai_fingerspelling"
+  num_classes: 42
+  num_landmarks: 21
+  landmark_dim: 3
+  normalize_translation: true
+  normalize_scale: true
+
+# ── Model (use pretrained ASL encoder) ───────────────────────────────────────
+model:
+  encoder: "transformer"
+  embedding_dim: 128
+  pretrained: "results/checkpoints/best_asl.pt"
+
+# ── Few-Shot ─────────────────────────────────────────────────────────────────
+few_shot:
+  method: "prototypical"
+  n_way: 5
+  k_shot: 5
+  q_query: 15
+  episodes_train: 1000
+  episodes_eval: 1000
+
+# ── Adaptation ───────────────────────────────────────────────────────────────
+adaptation:
+  mode: "finetune_last"           # freeze | finetune_last | full_finetune
+  lr: 1.0e-4
+  epochs: 50
+  shots: [1, 5]
+
+# ── Output ───────────────────────────────────────────────────────────────────
+output_dir: "results/cross_lingual"
+checkpoint_dir: "results/cross_lingual/checkpoints"
+log_file: "results/cross_lingual/train.log"

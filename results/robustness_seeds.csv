@@ -1,0 +1,5 @@
+dataset,encoder,representation,seeds,k_shot,acc_seed_42,acc_seed_1337,acc_seed_2024,mean,std
+asl_alphabet,mlp,angle,"[42, 1337, 2024]",5,0.8824,0.8919,0.892,0.8888,0.0055
+libras_alphabet,mlp,angle,"[42, 1337, 2024]",5,0.9414,0.9464,0.9361,0.9413,0.0052
+arabic_sign_alphabet,mlp,angle,"[42, 1337, 2024]",5,0.901,0.906,0.8899,0.899,0.0083
+thai_fingerspelling,mlp,angle,"[42, 1337, 2024]",5,0.5182,0.5053,0.5139,0.5125,0.0066

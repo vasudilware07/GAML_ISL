@@ -1,0 +1,35 @@
+\begin{tabular}{@{}ll ccc ccc@{}}
+\toprule
+& & \multicolumn{3}{c}{MLP Encoder} & \multicolumn{3}{c}{Transformer Encoder} \\
+\cmidrule(lr){3-5} \cmidrule(lr){6-8}
+Dataset & Repr.& 1-shot & 3-shot & 5-shot & 1-shot & 3-shot & 5-shot \\
+\midrule
+  \multirow{3}{*}{ASL}
+    & \texttt{raw} & 88.7\ci{0.7} & 93.8\ci{0.5} & 94.9\ci{0.4} & 74.2\ci{1.0} & 80.3\ci{0.9} & 82.1\ci{0.9} \\
+  
+    & \texttt{angle} & 81.5\ci{0.9} & 86.8\ci{0.7} & 88.4\ci{0.6} & 80.8\ci{0.9} & 86.2\ci{0.7} & 87.7\ci{0.7} \\
+  
+    & \texttt{raw\_angle} & 90.4\ci{0.7} & 94.5\ci{0.5} & \textbf{95.4}\ci{0.4} & 90.8\ci{0.7} & 94.7\ci{0.4} & 95.4\ci{0.4} \\
+\midrule
+  \multirow{3}{*}{LIBRAS}
+    & \texttt{raw} & 69.7\ci{1.0} & 78.9\ci{0.8} & 81.2\ci{0.8} & 61.1\ci{0.9} & 65.9\ci{0.9} & 67.9\ci{0.9} \\
+  
+    & \texttt{angle} & 89.2\ci{0.7} & 92.9\ci{0.5} & \textbf{94.1}\ci{0.5} & 86.9\ci{0.8} & 91.1\ci{0.6} & 92.5\ci{0.5} \\
+  
+    & \texttt{raw\_angle} & 71.6\ci{1.0} & 82.2\ci{0.8} & 84.6\ci{0.8} & 72.8\ci{1.0} & 82.3\ci{0.8} & 84.7\ci{0.7} \\
+\midrule
+  \multirow{3}{*}{Arabic}
+    & \texttt{raw} & 51.3\ci{0.9} & 60.6\ci{0.8} & 64.5\ci{0.8} & 43.1\ci{0.9} & 47.1\ci{1.0} & 49.0\ci{0.9} \\
+  
+    & \texttt{angle} & 81.1\ci{0.9} & 88.2\ci{0.6} & \textbf{89.8}\ci{0.6} & 78.3\ci{0.9} & 85.7\ci{0.7} & 87.8\ci{0.6} \\
+  
+    & \texttt{raw\_angle} & 55.5\ci{1.0} & 66.6\ci{0.9} & 71.0\ci{0.9} & 55.6\ci{1.0} & 63.2\ci{0.9} & 67.3\ci{0.9} \\
+\midrule
+  \multirow{3}{*}{Thai}
+    & \texttt{raw} & 40.3\ci{0.7} & 47.0\ci{0.7} & 48.8\ci{0.8} & 33.3\ci{0.7} & 35.7\ci{0.6} & 36.0\ci{0.6} \\
+  
+    & \texttt{angle} & 46.2\ci{0.8} & 51.2\ci{0.8} & \textbf{52.7}\ci{0.8} & 44.6\ci{0.8} & 50.6\ci{0.8} & 51.8\ci{0.8} \\
+  
+    & \texttt{raw\_angle} & 43.4\ci{0.8} & 50.2\ci{0.8} & 51.9\ci{0.8} & 42.3\ci{0.7} & 47.1\ci{0.7} & 48.7\ci{0.8} \\
+\bottomrule
+\end{tabular}
