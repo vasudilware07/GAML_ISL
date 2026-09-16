@@ -1,6 +1,5 @@
 # Geometry-Aware Metric Learning for Cross-Lingual Few-Shot Sign Language Recognition
 
-[![GitHub](https://img.shields.io/badge/GitHub-fjkrch%2Fsign__metric__learning-blue?logo=github)](https://github.com/fjkrch/sign_metric_learning)
 
 > Modular, reproducible research framework for **static-image** sign-language
 > recognition using metric learning with cross-lingual transfer across four
